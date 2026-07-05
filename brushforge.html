@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>BrushForge v0.4.0 — UE4.27 Blockout</title>
+<title>BrushForge v0.11.0 — UE4.27 Blockout</title>
 <style>
   :root{
     --bg:#101216; --panel:#181B22; --panel2:#1F232C; --line:#2A2F3A;
@@ -182,6 +182,9 @@
   .oibtn:disabled{opacity:.18;pointer-events:none;}
   #outlinerBtn.active{border-color:var(--add);color:var(--add);}
 
+  #marquee{position:absolute;display:none;border:1px solid var(--sel);
+           background:rgba(242,244,248,.12);pointer-events:none;z-index:6;}
+
   #toast{position:absolute;left:50%;bottom:18px;transform:translate(-50%,20px);opacity:0;
          background:#11241f;border:1px solid #1f6f4f;color:#8df0c4;font-family:var(--mono);font-size:12px;
          padding:9px 14px;border-radius:24px;transition:all .25s;z-index:40;pointer-events:none;}
@@ -280,6 +283,7 @@
     <div id="palette"></div>
     <div id="hud"></div>
     <div id="toast"></div>
+    <div id="marquee"></div>
     <div id="selbar">
       <div class="selGroup">
         <div class="modeSeg" id="spaceSeg">
@@ -290,6 +294,12 @@
           <button data-mode="move" class="on" title="Move">MOVE</button>
           <button data-mode="rotate" title="Rotate">ROTATE</button>
           <button data-mode="scale" title="Scale">SCALE</button>
+          <button data-mode="geom" title="Push faces / slide edges / move vertices (single box only)">GEO</button>
+        </div>
+        <div class="modeSeg" id="geoSubSeg" style="display:none">
+          <button data-sub="face" class="on" title="Push faces">FACE</button>
+          <button data-sub="edge" title="Slide edges">EDGE</button>
+          <button data-sub="vertex" title="Move vertices">VERT</button>
         </div>
       </div>
       <div class="selDivider"></div>
@@ -322,6 +332,10 @@
         <div class="dhead">
           <span class="swatch" style="background:var(--add)"></span>
           <div class="ititle">Export to Unreal <small id="dcount"></small></div>
+          <div class="modeSeg" id="exportScopeSeg" style="display:none">
+            <button data-scope="all" class="on" title="Export all brushes">ALL</button>
+            <button data-scope="sel" title="Export selected only">SELECTED</button>
+          </div>
           <button id="dclose" title="Close">✕</button>
         </div>
         <div class="dactions">
@@ -377,6 +391,57 @@
    (Y up) only for rendering; export uses raw Unreal coords.
    ------------------------------------------------------------
    CHANGELOG
+   0.11.0 Unified GEO interaction: face and edge now work like vertex — tap
+          an element to select it, then an axis-constrained gizmo appears
+          (1 arrow for a face along its normal, 2 for an edge, 3 for a
+          vertex). Replaces the old direct-drag on face/edge handles. Edge
+          editing is now axis-constrained (was free-plane drag). Pristine-box
+          face push still stays parametric (exact CubeBuilder preserved);
+          convexity validation and the flat-box gate are unchanged.
+   0.10.0 Export selected only: when brushes are selected, the export drawer
+          shows an All/Selected toggle (defaults to Selected). buildT3D takes
+          an optional brush list; scoped export keeps contiguous object
+          indices and CRLF. No selection → toggle hidden, exports all as before.
+   0.9.0  GEO vertex translation (Unreal-style): tap a corner to select it,
+          then drag a 3-axis move gizmo to translate it one axis at a time.
+          GEO now has a Face/Edge/Vertex sub-toggle (shows one handle set at
+          a time instead of face+edge together). Vertex moves are convexity-
+          validated and create the same b.corners edited-geometry as edge
+          slide (PolyList-only export). Reuses localAxisToThree/axisParam/
+          validateCorners from prior versions. Flat-box gate unchanged.
+   0.8.1  Local/World gizmo now works on pitched/rolled brushes. Local-space
+          move handles and their drag axes track the brush's true facing at
+          any orientation (was yaw-only), via localAxisToThree/brushThreeQuat
+          built on rotUnreal so visuals + drag + geometry stay consistent.
+          Yaw-only brushes are unchanged (verified identical). GEO mode stays
+          gated to flat brushes — its local transforms are still yaw-only.
+   0.8.0  Full 3-axis rotation (pitch/roll added to yaw). Single shared
+          rotUnreal() applies UE's FRotator order (yaw→pitch→roll) for both
+          display and export; rotation rides RelativeRotation on the
+          component, so pristine boxes keep their exact CubeBuilder at any
+          orientation. Rotate gizmo now has 3 colour-coded rings; inspector
+          has yaw/pitch/roll fields. GEO mode + ground-snap are gated to
+          flat (yaw-only) brushes — they toast and no-op on tilted brushes,
+          since their local transforms are still yaw-only (a scope-2 item).
+          Save format gains pitch/roll (additive; old saves load unchanged).
+   0.7.1  Fix: undo/redo didn't rebuild the combined CSG mesh — the blue
+          result stayed on pre-undo geometry while per-brush meshes moved.
+          applySnapshot now calls scheduleCsg (undo/redo bypass the
+          pushHistory patch that normally triggers it).
+   0.7.0  Two-finger tap = undo. A quick, near-stationary two-finger tap
+          undoes; any real pan/pinch (movement >12px or >300ms) is unaffected.
+          Fires exactly once whether fingers lift together or one at a time.
+   0.6.0  GEO mode: box face push + edge slide (single box selection).
+          Face push on a pristine box stays parametric — asymmetric resize,
+          exact CubeBuilder export survives. Edge slide creates b.corners
+          (8 local points) and the brush exports PolyList-only (same known
+          limitation as ramp). Non-planar quads auto-triangulate on the
+          convex diagonal; every drag is convexity-validated (invalid moves
+          rejected). Inspector shows edited state + reset-to-box.
+   0.5.0  Marquee (box) select: hold ~300ms then drag on empty space to
+          box-select multiple brushes at once. A quick drag still orbits,
+          unchanged. Long-press-without-moving still toggles a single brush
+          (unchanged). Replace-only for now — no additive/subtractive drag.
    0.4.0  Real BSP-tree CSG display with UE-style brush order
           (subtracts only cut brushes above them in the outliner).
           Multi-select (shift/long-press/Ctrl+A), outliner panel,
@@ -385,7 +450,7 @@
    ============================================================ */
 
 // ---- version ----
-const VERSION = "0.4.0";
+const VERSION = "0.11.0";
 
 // ---- config ----
 const SNAP = {value:10};
@@ -416,6 +481,7 @@ function applySnapshot(snap){
   const selId=selected?selected.id:null;
   selected=selId?brushes.find(b=>b.id===selId)||null:null;
   select(selected); refreshHUD();
+  scheduleCsg(); // rebuild the combined CSG mesh — undo/redo bypass pushHistory's patch
 }
 function undo(){
   if(histIdx<=0) return;
@@ -494,6 +560,68 @@ function _updateSelVisuals(){
 function snap(v){ const s=SNAP.value; return s>0 ? Math.round(v/s)*s : v; }
 function snapDeg(d){ const s=ROT_SNAP.value; return s>0 ? Math.round(d/s)*s : d; }
 
+// ---- edited box geometry (face push / edge slide) ----
+// A box may carry b.corners: 8 LOCAL points indexed by the same bit convention
+// the CubeBuilder export uses — i: bit4=X, bit2=Y, bit1=Z (set bit = +half).
+// Face push on a PRISTINE box stays parametric (size+pos change, exact builder
+// survives). Edge slide is what creates corners; from then on the brush
+// exports PolyList-only, same known limitation as ramp.
+const GEO_FACES=[ // quads CCW-outward, derived from the box faces below
+  {axis:'x',sign: 1,quad:[4,6,7,5]}, {axis:'x',sign:-1,quad:[2,0,1,3]},
+  {axis:'y',sign: 1,quad:[6,2,3,7]}, {axis:'y',sign:-1,quad:[0,4,5,1]},
+  {axis:'z',sign: 1,quad:[1,5,7,3]}, {axis:'z',sign:-1,quad:[2,6,4,0]},
+];
+const GEO_EDGES=[]; // pairs of corner indices differing in exactly one bit
+for(let i=0;i<8;i++) for(const bit of [4,2,1]) if(!(i&bit))
+  GEO_EDGES.push({i, j:i|bit, axis:bit===4?'x':bit===2?'y':'z'});
+const AXI={x:0,y:1,z:2};
+function cornersFromSize(b){
+  const hx=b.size.x/2, hy=b.size.y/2, hz=b.size.z/2, C=[];
+  for(let i=0;i<8;i++) C.push([(i&4)?hx:-hx,(i&2)?hy:-hy,(i&1)?hz:-hz]);
+  return C;
+}
+// Moving one edge makes adjacent quads non-planar; UE requires planar polys,
+// so those quads split into two triangles (winding preserved, normals still
+// derived from winding — the facesFor invariant holds).
+function quadPlanar(q){
+  const n=normalOf(q);
+  const d=n[0]*(q[3][0]-q[0][0])+n[1]*(q[3][1]-q[0][1])+n[2]*(q[3][2]-q[0][2]);
+  return Math.abs(d)<0.01;
+}
+// Split a non-planar quad on whichever diagonal keeps the crease CONVEX
+// (bulging outward). A fixed a-c diagonal can fold a legal shape concave —
+// test the 4th point against the a-c tri's plane and flip to b-d if it's in
+// front. Used by BOTH facesFor and validateCorners so display, CSG, export,
+// and the validity gate all agree on the exact same geometry.
+function splitQuad(q){
+  if(quadPlanar(q)) return [q];
+  const t1=[q[0],q[1],q[2]];
+  const n=normalOf(t1);
+  const w=n[0]*t1[0][0]+n[1]*t1[0][1]+n[2]*t1[0][2];
+  const d=n[0]*q[3][0]+n[1]*q[3][1]+n[2]*q[3][2]-w;
+  if(d>0) return [[q[1],q[2],q[3]],[q[1],q[3],q[0]]]; // b-d diagonal
+  return [t1,[q[0],q[2],q[3]]];                        // a-c diagonal
+}
+// Convexity gate: every corner must sit on/behind every face plane. Runs on
+// every geo drag; invalid moves are rejected (brush keeps its last valid
+// shape) because both UE's BSP and our polygon-clip CSG require convexity.
+function validateCorners(C){
+  for(const ed of GEO_EDGES){
+    const a=C[ed.i], b=C[ed.j];
+    if(Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])<1) return false; // degenerate edge
+  }
+  const tris=[];
+  GEO_FACES.forEach(f=>{
+    splitQuad(f.quad.map(i=>C[i])).forEach(face=>tris.push(face));
+  });
+  for(const t of tris){
+    const n=normalOf(t);
+    const w=n[0]*t[0][0]+n[1]*t[0][1]+n[2]*t[0][2];
+    for(const p of C){ if(n[0]*p[0]+n[1]*p[1]+n[2]*p[2]-w>0.5) return false; }
+  }
+  return true;
+}
+
 // Face generators. Each face is a vertex loop wound CCW as seen from
 // OUTSIDE (right-hand rule -> outward normal), matching UE4.27's BSP
 // convention. Normals are DERIVED from winding so the two can't disagree.
@@ -501,12 +629,18 @@ function facesFor(b, opts){
   const {type,size}=b, hx=size.x/2, hy=size.y/2, hz=size.z/2;
   const F=[]; // each: [ [x,y,z], ... ] local, CCW outward
   if(type==='box'){
+    if(b.corners){
+      GEO_FACES.forEach(f=>{
+        splitQuad(f.quad.map(i=>b.corners[i].slice())).forEach(face=>F.push(face));
+      });
+    } else {
     F.push([[hx,-hy,-hz],[hx,hy,-hz],[hx,hy,hz],[hx,-hy,hz]]);     // +X
     F.push([[-hx,hy,-hz],[-hx,-hy,-hz],[-hx,-hy,hz],[-hx,hy,hz]]); // -X
     F.push([[hx,hy,-hz],[-hx,hy,-hz],[-hx,hy,hz],[hx,hy,hz]]);     // +Y
     F.push([[-hx,-hy,-hz],[hx,-hy,-hz],[hx,-hy,hz],[-hx,-hy,hz]]); // -Y
     F.push([[-hx,-hy,hz],[hx,-hy,hz],[hx,hy,hz],[-hx,hy,hz]]);     // +Z
     F.push([[-hx,hy,-hz],[hx,hy,-hz],[hx,-hy,-hz],[-hx,-hy,-hz]]); // -Z
+    }
   } else if(type==='cyl'){
     const n=b.sides||16, top=[],bot=[];
     for(let i=0;i<n;i++){const a=i/n*Math.PI*2;
@@ -527,15 +661,34 @@ function facesFor(b, opts){
     F.push([A,B,E]);     // side    -Y
     F.push([D,G,C]);     // side    +Y
   }
-  // yaw about Z, then translate -> world Unreal coords
-  // EXPORT path keeps geometry local (centered at origin); position/yaw are
-  // applied by the brush component so they survive a UE builder rebuild.
+  // Rotate then translate -> world Unreal coords.
+  // EXPORT path keeps geometry local (centered at origin); position/rotation
+  // are applied by the brush component so they survive a UE builder rebuild.
   if(opts && opts.local) return F.map(face=>face.map(p=>[p[0],p[1],p[2]]));
-  // Display: pos is the base-center, so lift local Z by half-height. Growing a
-  // dimension then keeps the base/centre fixed instead of translating.
-  const c=Math.cos(b.yaw||0), s=Math.sin(b.yaw||0), bz=b.pos.z;
-  const tx=p=>[p[0]*c-p[1]*s + b.pos.x, p[0]*s+p[1]*c + b.pos.y, p[2] + bz];
+  // Display: apply full FRotator rotation (yaw→pitch→roll, UE's order) about
+  // the centre, then translate to world position.
+  const bz=b.pos.z;
+  const tx=p=>{ const r=rotUnreal(p, b.yaw||0, b.pitch||0, b.roll||0);
+                return [r[0]+b.pos.x, r[1]+b.pos.y, r[2]+bz]; };
   return F.map(face=>face.map(tx));
+}
+// UE FRotator applied to a vector: rotate about Z (yaw), then Y (pitch), then
+// X (roll) — i.e. v' = Rx(roll)·Ry(pitch)·Rz(yaw)·v. Handedness matches UE4's
+// RotateVector (yaw left-hand about +Z, pitch/roll right-hand). All angles in
+// RADIANS here. This is the SINGLE source of truth shared by display and the
+// export's RelativeRotation, so the preview can't drift from the paste.
+function rotUnreal(p, yaw, pitch, roll){
+  let x=p[0], y=p[1], z=p[2];
+  // yaw about +Z (matches the previous yaw-only block exactly when pitch=roll=0)
+  let cz=Math.cos(yaw), sz=Math.sin(yaw);
+  let x1=x*cz - y*sz, y1=x*sz + y*cz, z1=z;
+  // pitch about +Y (UE: positive pitch tilts +X up toward +Z)
+  let cy=Math.cos(pitch), sy=Math.sin(pitch);
+  let x2=x1*cy - z1*sy, y2=y1, z2=x1*sy + z1*cy;
+  // roll about +X (right-hand)
+  let cx=Math.cos(roll), sx=Math.sin(roll);
+  let x3=x2, y3=y2*cx - z2*sx, z3=y2*sx + z2*cx;
+  return [x3, y3, z3];
 }
 // outward unit normal from the first three (planar) vertices
 function normalOf(face){
@@ -583,7 +736,7 @@ function defaultName(type,id){ return `${TYPE_NAMES[type]||type} ${id}`; }
 function addBrush(type){
   const b={id:nextId++, type, op:currentOp,
     pos:{x:0,y:0,z:100},
-    size:{x:200,y:200,z:200}, yaw:0, sides:16, visible:true};
+    size:{x:200,y:200,z:200}, yaw:0, pitch:0, roll:0, sides:16, visible:true};
   b.name=defaultName(type,b.id);
   brushes.push(b); buildMesh(b); select(b); pushHistory(); refreshHUD();
 }
@@ -704,25 +857,52 @@ function buildInspector(){
                    : {x:'Size X',   y:'Size Y',   z:'Size Z'};
   const sec=(t)=>{const h=document.createElement('div');h.className='field full sec';h.innerHTML=`<label>${t}</label>`;return h;};
 
-  // yaw field (degrees) — built here, placed in the Position group
-  const yaw=document.createElement('div'); yaw.className='field';
-  yaw.innerHTML='<label>Yaw °</label>';
-  const yr=document.createElement('div'); yr.className='row';
-  const yd=document.createElement('button');yd.className='step';yd.textContent='–';
-  const yi=document.createElement('input');yi.className='num';yi.type='number';yi.value=Math.round((b.yaw||0)*180/Math.PI);
-  const yu=document.createElement('button');yu.className='step';yu.textContent='+';
-  const setYaw=d=>{b.yaw=d*Math.PI/180;pushHistory();buildMesh(b);buildInspector();};
-  const curDeg=()=>(b.yaw||0)*180/Math.PI;
-  yd.onclick=()=>setYaw(snapDeg(curDeg()-ROT_SNAP.value)); yu.onclick=()=>setYaw(snapDeg(curDeg()+ROT_SNAP.value));
-  yi.onchange=()=>setYaw(parseFloat(yi.value)||0);
-  yr.append(yd,yi,yu); yaw.append(yr);
+  // rotation fields (degrees) — one builder for yaw/pitch/roll
+  const rotField=(label,key)=>{
+    const wrap=document.createElement('div'); wrap.className='field';
+    wrap.innerHTML=`<label>${label} °</label>`;
+    const r=document.createElement('div'); r.className='row';
+    const d=document.createElement('button');d.className='step';d.textContent='–';
+    const inp=document.createElement('input');inp.className='num';inp.type='number';
+    inp.value=Math.round((b[key]||0)*180/Math.PI);
+    const u=document.createElement('button');u.className='step';u.textContent='+';
+    const set=deg=>{b[key]=deg*Math.PI/180;pushHistory();buildMesh(b);buildInspector();};
+    const cur=()=>(b[key]||0)*180/Math.PI;
+    d.onclick=()=>set(snapDeg(cur()-ROT_SNAP.value)); u.onclick=()=>set(snapDeg(cur()+ROT_SNAP.value));
+    inp.onchange=()=>set(parseFloat(inp.value)||0);
+    r.append(d,inp,u); wrap.append(r); return wrap;
+  };
 
   // POSITION group — these MOVE the brush
   ibody.append(sec('Position (centre) — matches UE coordinates'));
   ibody.append(field('Pos X','pos','x',b.pos), field('Pos Y','pos','y',b.pos));
-  ibody.append(field('Pos Z','pos','z',b.pos), yaw);
+  ibody.append(field('Pos Z','pos','z',b.pos));
+
+  // ROTATION group — full FRotator (yaw→pitch→roll, UE order)
+  ibody.append(sec('Rotation — UE FRotator (Yaw→Pitch→Roll)'));
+  ibody.append(rotField('Yaw','yaw'), rotField('Pitch','pitch'));
+  ibody.append(rotField('Roll','roll'));
 
   // SIZE group — these RESIZE the brush
+  if(b.type==='box'&&b.corners){
+    // Size fields would fight the corners — replace with a note + reset.
+    ibody.append(sec('Geometry — edited (faces/edges moved)'));
+    const note=document.createElement('div'); note.className='field full';
+    note.innerHTML='<label style="text-transform:none;letter-spacing:0">Exports as raw polygons (no exact builder — same as ramp). Use GEO mode handles to keep editing, or reset:</label>';
+    ibody.append(note);
+    const rw=document.createElement('div'); rw.className='field full';
+    const rbtn=document.createElement('button'); rbtn.className='btn danger';
+    rbtn.textContent='Reset to parametric box';
+    rbtn.onclick=()=>{
+      const C=b.corners;
+      const ext=a=>{let mn=Infinity,mx=-Infinity;C.forEach(p=>{mn=Math.min(mn,p[a]);mx=Math.max(mx,p[a]);});return mx-mn;};
+      b.size={x:Math.max(10,Math.round(ext(0))),y:Math.max(10,Math.round(ext(1))),z:Math.max(10,Math.round(ext(2)))};
+      delete b.corners;
+      pushHistory(); buildMesh(b); select(b); refreshHUD();
+      toast('Reset to box (size = bounding extents)');
+    };
+    rw.append(rbtn); ibody.append(rw);
+  } else {
   ibody.append(sec('Size — resizes the brush'));
   ibody.append(field(dl.x,'size','x',b.size), field(dl.y,'size','y',b.size));
   if(round){
@@ -739,6 +919,7 @@ function buildInspector(){
   } else {
     ibody.append(field(dl.z,'size','z',b.size));
   }
+  } // end size-vs-edited branch
 
   // op toggle + actions row
   const opF=document.createElement('div'); opF.className='field full';
@@ -787,13 +968,16 @@ function brushT3D(b,idx){
   const model=`Model_${idx}`, polys=`Polys_${idx}`;
   const bt=b.op==='add'?'Brush_Add':'Brush_Subtract';
   const loc=`RelativeLocation=(X=${ff(b.pos.x)},Y=${ff(b.pos.y)},Z=${ff(b.pos.z)})`;
-  const rot=`RelativeRotation=(Pitch=0.000000,Yaw=${ff((b.yaw||0)*180/Math.PI)},Roll=0.000000)`;
+  const rot=`RelativeRotation=(Pitch=${ff((b.pitch||0)*180/Math.PI)},Yaw=${ff((b.yaw||0)*180/Math.PI)},Roll=${ff((b.roll||0)*180/Math.PI)})`;
 
   // Brush builder. UE rebuilds a pasted brush from its builder, so the builder
   // must carry the real dimensions or the PolyList gets overwritten by a
   // default 200^3 cube. Box has an exact builder; others fall back to PolyList.
   let bDecl='', bBody='', bRef='';
-  if(b.type==='box'){
+  // Edited (corners) boxes get NO builder — an exact CubeBuilder would lie
+  // about the shape and UE would rebuild it as a plain cube. PolyList-only
+  // fallback, same known limitation as ramp.
+  if(b.type==='box'&&!b.corners){
     const hx=b.size.x/2,hy=b.size.y/2,hz=b.size.z/2, V=[];
     for(let i=0;i<8;i++){const x=(i&4)?hx:-hx,y=(i&2)?hy:-hy,z=(i&1)?hz:-hz;
       V.push(`            Vertices(${i})=(X=${ff(x)},Y=${ff(y)},Z=${ff(z)})`);}
@@ -841,8 +1025,9 @@ ${bRef}         bHidden=False
          ActorLabel="${name}"
       End Actor`);
 }
-function buildT3D(){
-  const body=brushes.map((b,i)=>brushT3D(b,i)).join('\n');
+function buildT3D(list){
+  const src=list||brushes;
+  const body=src.map((b,i)=>brushT3D(b,i)).join('\n');
   const t=`Begin Map\n   Begin Level\n${body}\n   End Level\nBegin Surface\nEnd Surface\nEnd Map\n`;
   // UE4.27 on Windows writes \r\n line endings and its T3D parser expects them.
   // Pasting a Unix \n-only string into the viewport does nothing — silently ignored.
@@ -852,10 +1037,16 @@ function buildT3D(){
 // ---- export hub ----
 const exportOverlay=document.getElementById('exportOverlay');
 let lastT3D='';
+let exportScope='all'; // 'all' | 'sel'
+function exportBrushes(){
+  return exportScope==='sel' ? brushes.filter(b=>selectedSet.has(b)) : brushes;
+}
 function showT3D(){
-  lastT3D=buildT3D();
+  const src=exportBrushes();
+  lastT3D=buildT3D(src);
   document.getElementById('t3d').value=lastT3D;
-  document.getElementById('dcount').textContent=`(${brushes.length} brush${brushes.length===1?'':'es'})`;
+  const n=src.length;
+  document.getElementById('dcount').textContent=`(${n} brush${n===1?'':'es'}${exportScope==='sel'?', selected':''})`;
   const lines=lastT3D.split('\n').length, chars=lastT3D.length;
   document.getElementById('diagInfo').textContent=`${lines} lines · ${chars.toLocaleString()} chars — ${chars>100?'✓ looks good':'⚠ suspiciously short'}`;
   document.getElementById('dhint').innerHTML=
@@ -872,8 +1063,21 @@ function showT3D(){
 function closeExport(){ exportOverlay.classList.remove('open'); }
 function openExport(){
   if(brushes.length===0){toast('Place a brush first');return;}
+  // Default scope to selection if one exists; only show the toggle when it's meaningful.
+  const hasSel=selectedSet.size>0;
+  const seg=document.getElementById('exportScopeSeg');
+  seg.style.display=hasSel?'flex':'none';
+  exportScope=hasSel?'sel':'all';
+  document.querySelectorAll('#exportScopeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.scope===exportScope));
   showT3D();
 }
+document.querySelectorAll('#exportScopeSeg button').forEach(btn=>{
+  btn.onclick=()=>{
+    exportScope=btn.dataset.scope==='sel'?'sel':'all';
+    document.querySelectorAll('#exportScopeSeg button').forEach(b=>b.classList.toggle('on',b===btn));
+    showT3D(); // rebuild lastT3D so Copy/Share/Email all use the chosen scope
+  };
+});
 exportOverlay.addEventListener('click',e=>{ if(e.target===exportOverlay) closeExport(); });
 window.addEventListener('keydown',e=>{ if(e.key==='Escape') closeExport(); });
 
@@ -946,9 +1150,13 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 
 document.getElementById('groundBtn').onclick=()=>{
   if(!selectedSet.size) return;
+  const flat=[...selectedSet].filter(b=>Math.abs(b.pitch||0)<1e-6&&Math.abs(b.roll||0)<1e-6);
+  const skipped=selectedSet.size-flat.length;
+  if(!flat.length){ toast('Ground-snap needs a flat brush (reset pitch/roll)'); return; }
   pushHistory();
-  [...selectedSet].forEach(b=>snapToGround(b,true));
+  flat.forEach(b=>snapToGround(b,true));
   buildInspector(); refreshHUD();
+  if(skipped) toast(`Snapped ${flat.length}; skipped ${skipped} tilted`);
 };
 document.getElementById('dupBtn').onclick=()=>duplicateBrush(selected);
 document.getElementById('delBtn').onclick=()=>deleteBrush(selected);
@@ -1008,48 +1216,107 @@ if(window.ResizeObserver){ new ResizeObserver(()=>resize()).observe(view); }
 // Also re-check shortly after boot in case layout settles a frame late.
 requestAnimationFrame(resize); setTimeout(resize,300);
 
-let ptr={mode:null,x:0,y:0,d:0,moved:0,downT:0};
+let ptr={mode:null,x:0,y:0,downX:0,downY:0,d:0,moved:0,downT:0};
 const el=renderer.domElement;
 function tdist(t){const dx=t[0].clientX-t[1].clientX,dy=t[0].clientY-t[1].clientY;return Math.hypot(dx,dy);}
 function tmid(t){return{x:(t[0].clientX+t[1].clientX)/2,y:(t[0].clientY+t[1].clientY)/2};}
+
+// ---- marquee (box) select ----
+// Single-finger/left-mouse drag always meant "orbit" — there was no free
+// gesture left for box-select. Reusing the long-press timing that already
+// exists for toggle-select: a QUICK drag still orbits (unchanged feel), a
+// HELD-then-drag becomes marquee. Decision fires once real movement crosses
+// the same thresholds already used for tap-vs-drag detection below, so a
+// long-press-without-moving still falls through to the existing toggle-pick.
+const LONG_PRESS_MS=300;
+const marqueeEl=document.getElementById('marquee');
+function updateMarqueeRect(x0,y0,x1,y1){
+  marqueeEl.style.left=Math.min(x0,x1)+'px'; marqueeEl.style.top=Math.min(y0,y1)+'px';
+  marqueeEl.style.width=Math.abs(x1-x0)+'px'; marqueeEl.style.height=Math.abs(y1-y0)+'px';
+  marqueeEl.style.display='block';
+}
+function hideMarquee(){ marqueeEl.style.display='none'; }
+// Screen-space AABB of a brush's world-space vertices (reuses facesFor()+U2T()
+// so it stays correct under yaw, exactly like the gizmo's own screenPos calls).
+function screenAABBOfBrush(b){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  facesFor(b).forEach(face=>face.forEach(p=>{
+    const s=screenPos(U2T(p[0],p[1],p[2]));
+    if(s.x<minX)minX=s.x; if(s.x>maxX)maxX=s.x;
+    if(s.y<minY)minY=s.y; if(s.y>maxY)maxY=s.y;
+  }));
+  return {minX,minY,maxX,maxY};
+}
+function rectsOverlap(a,b){ return a.minX<=b.maxX && a.maxX>=b.minX && a.minY<=b.maxY && a.maxY>=b.minY; }
+// Selection is REPLACE-only for v1 (matches selectAll()'s pattern below);
+// additive/subtractive marquee is a natural follow-up, not built here.
+function finalizeMarquee(x0,y0,x1,y1){
+  const rect={minX:Math.min(x0,x1),maxX:Math.max(x0,x1),minY:Math.min(y0,y1),maxY:Math.max(y0,y1)};
+  const hits=brushes.filter(b=>b.visible!==false && rectsOverlap(rect,screenAABBOfBrush(b)));
+  selectedSet.clear();
+  hits.forEach(b=>selectedSet.add(b));
+  selected=hits[hits.length-1]||null;
+  _updateSelVisuals(); buildInspector();
+  document.getElementById('selbar').classList.toggle('show',selectedSet.size>0);
+  refreshOutliner();
+}
 
 el.addEventListener('touchstart',e=>{
   if(e.touches.length===1){
     const tx=e.touches[0].clientX, ty=e.touches[0].clientY;
     const hit=gizmoHitAxis(tx,ty);
     if(hit){ ptr.mode='gizmo'; gizmoStart(hit,tx,ty); }
-    else { ptr.mode='orbit'; }
-    ptr.x=tx;ptr.y=ty;ptr.moved=0;ptr.downT=Date.now();
+    else { ptr.mode='pending'; }
+    ptr.x=tx;ptr.y=ty;ptr.downX=tx;ptr.downY=ty;ptr.moved=0;ptr.downT=Date.now();
   }
-  else if(e.touches.length===2){ptr.mode='pan';ptr.d=tdist(e.touches);const m=tmid(e.touches);ptr.x=m.x;ptr.y=m.y;}
+  else if(e.touches.length===2){ptr.mode='pan';ptr.d=tdist(e.touches);const m=tmid(e.touches);ptr.x=m.x;ptr.y=m.y;ptr.moved=0;ptr.downT=Date.now();ptr.d0=ptr.d;}
 },{passive:false});
 el.addEventListener('touchmove',e=>{
   e.preventDefault();
   if(ptr.mode==='gizmo'&&e.touches.length===1){
     ptr.moved+=10; gizmoMoveTo(e.touches[0].clientX,e.touches[0].clientY);
+  } else if(ptr.mode==='pending'&&e.touches.length===1){
+    const tx=e.touches[0].clientX, ty=e.touches[0].clientY;
+    ptr.moved+=Math.abs(tx-ptr.x)+Math.abs(ty-ptr.y); ptr.x=tx;ptr.y=ty;
+    if(ptr.moved>=8){
+      ptr.mode=(Date.now()-ptr.downT<LONG_PRESS_MS)?'orbit':'marquee';
+      if(ptr.mode==='marquee') updateMarqueeRect(ptr.downX,ptr.downY,tx,ty);
+    }
   } else if(ptr.mode==='orbit'&&e.touches.length===1){
     const dx=e.touches[0].clientX-ptr.x, dy=e.touches[0].clientY-ptr.y;
     ptr.moved+=Math.abs(dx)+Math.abs(dy);
     orbit.az-=dx*0.006; orbit.el=Math.max(0.05,Math.min(1.5,orbit.el+dy*0.006));
     ptr.x=e.touches[0].clientX;ptr.y=e.touches[0].clientY; updateCamera();
+  } else if(ptr.mode==='marquee'&&e.touches.length===1){
+    ptr.x=e.touches[0].clientX; ptr.y=e.touches[0].clientY;
+    updateMarqueeRect(ptr.downX,ptr.downY,ptr.x,ptr.y);
   } else if(ptr.mode==='pan'&&e.touches.length===2){
     const nd=tdist(e.touches); orbit.dist=Math.max(150,Math.min(12000,orbit.dist*(ptr.d/nd))); ptr.d=nd;
     const m=tmid(e.touches), dx=m.x-ptr.x, dy=m.y-ptr.y; ptr.x=m.x;ptr.y=m.y;
+    ptr.moved+=Math.abs(dx)+Math.abs(dy)+Math.abs(nd-(ptr.d0||nd)); ptr.d0=nd;
     panCamera(dx,dy); updateCamera();
   }
 },{passive:false});
 el.addEventListener('touchend',e=>{
-  if(ptr.mode==='gizmo'){ gizmoDrag=null; pushHistory(); }
-  else if(ptr.mode==='orbit'&&ptr.moved<8&&Date.now()-ptr.downT<300){ pick(ptr.x,ptr.y); }
-  else if(ptr.mode==='orbit'&&ptr.moved<8&&Date.now()-ptr.downT>=300){ pick(ptr.x,ptr.y,true); } // long-press = toggle
+  if(ptr.mode==='gizmo'){ const dragged=!!gizmoDrag; gizmoDrag=null; if(dragged) pushHistory(); }
+  else if(ptr.mode==='marquee'){ finalizeMarquee(ptr.downX,ptr.downY,ptr.x,ptr.y); hideMarquee(); }
+  else if(ptr.mode==='pending'&&ptr.moved<8&&Date.now()-ptr.downT<300){ pick(ptr.x,ptr.y); }
+  else if(ptr.mode==='pending'&&ptr.moved<8&&Date.now()-ptr.downT>=300){ pick(ptr.x,ptr.y,true); } // long-press = toggle
+  // Two-finger tap = undo. Tiny movement + short duration separate it from a
+  // pan/pinch. Fingers may lift one-at-a-time (2->1->0) or together (2->0);
+  // the _twoTapDone flag makes it fire exactly once either way.
+  else if(ptr.mode==='pan'&&ptr.moved<12&&Date.now()-ptr.downT<300&&!ptr._twoTapDone){
+    ptr._twoTapDone=true; undo();
+  }
+  if(!e.touches.length) ptr._twoTapDone=false; // reset once all fingers are up
   ptr.mode=e.touches.length?ptr.mode:null;
 },{passive:false});
 
 // mouse (desktop testing)
 let mb=0;
 el.addEventListener('mousedown',e=>{
-  mb=e.button;ptr.x=e.clientX;ptr.y=e.clientY;ptr.moved=0;
-  if(mb===0){ const hit=gizmoHitAxis(e.clientX,e.clientY); ptr.mode=hit?'gizmo':'cam'; if(hit) gizmoStart(hit,e.clientX,e.clientY); }
+  mb=e.button;ptr.x=e.clientX;ptr.y=e.clientY;ptr.downX=e.clientX;ptr.downY=e.clientY;ptr.moved=0;ptr.downT=Date.now();
+  if(mb===0){ const hit=gizmoHitAxis(e.clientX,e.clientY); ptr.mode=hit?'gizmo':'pending'; if(hit) gizmoStart(hit,e.clientX,e.clientY); }
   else ptr.mode='cam';
 });
 window.addEventListener('mousemove',e=>{
@@ -1057,13 +1324,22 @@ window.addEventListener('mousemove',e=>{
   if(e.buttons===0){mb=-1;return;}
   const dx=e.clientX-ptr.x,dy=e.clientY-ptr.y;ptr.moved+=Math.abs(dx)+Math.abs(dy);
   if(ptr.mode==='gizmo'){ gizmoMoveTo(e.clientX,e.clientY); }
-  else if(mb===0){orbit.az-=dx*0.006;orbit.el=Math.max(0.05,Math.min(1.5,orbit.el+dy*0.006));updateCamera();}
-  else{panCamera(dx,dy);updateCamera();}
-  ptr.x=e.clientX;ptr.y=e.clientY;
+  else if(ptr.mode==='pending'){
+    ptr.x=e.clientX;ptr.y=e.clientY;
+    if(ptr.moved>=6){
+      ptr.mode=(Date.now()-ptr.downT<LONG_PRESS_MS)?'cam':'marquee';
+      if(ptr.mode==='marquee') updateMarqueeRect(ptr.downX,ptr.downY,e.clientX,e.clientY);
+    }
+  } else if(ptr.mode==='marquee'){
+    ptr.x=e.clientX;ptr.y=e.clientY;
+    updateMarqueeRect(ptr.downX,ptr.downY,ptr.x,ptr.y);
+  } else if(mb===0){orbit.az-=dx*0.006;orbit.el=Math.max(0.05,Math.min(1.5,orbit.el+dy*0.006));updateCamera();ptr.x=e.clientX;ptr.y=e.clientY;}
+  else{panCamera(dx,dy);updateCamera();ptr.x=e.clientX;ptr.y=e.clientY;}
 });
 window.addEventListener('mouseup',e=>{
-  if(ptr.mode==='gizmo'){gizmoDrag=null;pushHistory();ptr.mode=null;mb=-1;return;}
-  if(mb===0&&ptr.moved<6)pick(e.clientX,e.clientY,e.shiftKey);
+  if(ptr.mode==='gizmo'){const dragged=!!gizmoDrag;gizmoDrag=null;if(dragged)pushHistory();ptr.mode=null;mb=-1;return;}
+  if(ptr.mode==='marquee'){ finalizeMarquee(ptr.downX,ptr.downY,e.clientX,e.clientY); hideMarquee(); mb=-1;ptr.mode=null; return; }
+  if(mb===0&&ptr.mode!=='cam'&&ptr.moved<6)pick(e.clientX,e.clientY,e.shiftKey);
   mb=-1;ptr.mode=null;
 });
 el.addEventListener('contextmenu',e=>e.preventDefault());
@@ -1090,6 +1366,12 @@ function pick(px,py,shift=false){
   } else if(!shift) select(null);
 }
 
+// Local Z extents — differs from ±size.z/2 once a box has edited corners.
+function localZMin(b){
+  if(b.corners) return Math.min(...b.corners.map(c=>c[2]));
+  return -b.size.z/2;
+}
+
 // Drop the brush straight down onto whatever's beneath it — another brush's
 // top surface if there is one, otherwise the world floor (Z=0). pos.z is the
 // brush's BASE anchor, so the hit point becomes the new pos.z directly.
@@ -1102,7 +1384,7 @@ function snapToGround(b, skipHistory=false){
   const hits=ray.intersectObjects(others,false);
   ray.far=Infinity;
   const surfaceZ=hits.length?hits[0].point.y:0;
-  b.pos.z=snap(surfaceZ+b.size.z/2);
+  b.pos.z=snap(surfaceZ-localZMin(b));
   if(!skipHistory){ pushHistory(); buildMesh(b); buildInspector(); refreshHUD();
     toast(hits.length?'Snapped onto brush below':'Snapped to ground (Z=0)');
   } else { buildMesh(b); }
@@ -1161,32 +1443,188 @@ const uniformPicker=new THREE.Mesh(new THREE.SphereGeometry(GZ*0.22,12,10),
                                     new THREE.MeshBasicMaterial({visible:false}));
 uniformPicker.userData.uniform=true; scaleGroup.add(uniformPicker);
 
-// -- rotate group: single yaw ring (brushes only support yaw) --
+// -- rotate group: three rings, one per FRotator axis --
+// Rings sit on the WORLD axes (screen-fixed), matching how UE's rotate widget
+// shows world-space rotation handles. yaw=Z ring, pitch=Y ring, roll=X ring.
+// Colours match the move/scale axis palette: X red, Y green, Z blue.
 const rotateGroup=new THREE.Group(); rotateGroup.visible=false; gizmoRoot.add(rotateGroup);
 const ringR=GZ*0.95, ringTube=GZ*0.032;
-const ringMesh=new THREE.Mesh(new THREE.TorusGeometry(ringR,ringTube,10,64),
-                               new THREE.MeshBasicMaterial({color:0xE8A33D}));
-ringMesh.rotation.x=Math.PI/2; rotateGroup.add(ringMesh);
-const rotatePicker=new THREE.Mesh(new THREE.TorusGeometry(ringR,ringTube*3.2,10,64),
-                                   new THREE.MeshBasicMaterial({visible:false}));
-rotatePicker.rotation.x=Math.PI/2; rotateGroup.add(rotatePicker);
+const rotatePickers=[];
+// axis: which FRotator angle; threeAxis: rotation to lay the torus in that plane
+[
+  {key:'yaw',   color:0x4F9DFF, rot:[Math.PI/2,0,0]}, // about Unreal+Z (Three+Y): ring in Three XZ
+  {key:'pitch', color:0x5BD15B, rot:[0,0,0]},          // about Unreal+Y (Three-Z): ring in Three XY
+  {key:'roll',  color:0xE8554E, rot:[0,Math.PI/2,0]}, // about Unreal+X (Three+X): ring in Three YZ
+].forEach(r=>{
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(ringR,ringTube,10,64),
+                             new THREE.MeshBasicMaterial({color:r.color}));
+  ring.rotation.set(r.rot[0],r.rot[1],r.rot[2]); rotateGroup.add(ring);
+  const pk=new THREE.Mesh(new THREE.TorusGeometry(ringR,ringTube*3.2,10,64),
+                           new THREE.MeshBasicMaterial({visible:false}));
+  pk.rotation.copy(ring.rotation); pk.userData.rotAxis=r.key; rotateGroup.add(pk);
+  rotatePickers.push(pk);
+});
+
+// -- geo group: face-push cubes + edge-slide spheres (single box only) --
+// Separate from gizmoRoot: handle POSITIONS are true geometry positions so
+// they can't live inside gizmoRoot's distance-based scale; only the handle
+// SIZES scale with camera distance (set per-frame in updateGeoHandles).
+const geoGroup=new THREE.Group(); geoGroup.visible=false; scene.add(geoGroup);
+const geoFaceHandles=[], geoEdgeHandles=[], geoPickers=[];
+GEO_FACES.forEach((f,fi)=>{
+  const h=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),
+                          new THREE.MeshBasicMaterial({color:0xE8A33D}));
+  geoGroup.add(h); geoFaceHandles.push(h);
+  const p=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),
+                          new THREE.MeshBasicMaterial({visible:false}));
+  p.userData.geo={type:'gface',fi}; geoGroup.add(p); geoPickers.push(p);
+  h.userData.picker=p;
+});
+GEO_EDGES.forEach((ed,ei)=>{
+  const h=new THREE.Mesh(new THREE.SphereGeometry(0.5,10,8),
+                          new THREE.MeshBasicMaterial({color:0x46C7D0}));
+  geoGroup.add(h); geoEdgeHandles.push(h);
+  const p=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6),
+                          new THREE.MeshBasicMaterial({visible:false}));
+  p.userData.geo={type:'gedge',ei}; geoGroup.add(p); geoPickers.push(p);
+  h.userData.picker=p;
+});
+// -- vertex handles: 8 corner spheres (Unreal-style select-then-move) --
+const geoVertHandles=[], geoVertPickers=[];
+for(let vi=0; vi<8; vi++){
+  const h=new THREE.Mesh(new THREE.SphereGeometry(0.5,10,8),
+                          new THREE.MeshBasicMaterial({color:0xE85AD0}));
+  geoGroup.add(h); geoVertHandles.push(h);
+  const p=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6),
+                          new THREE.MeshBasicMaterial({visible:false}));
+  p.userData.geo={type:'gvert',vi}; geoGroup.add(p); geoVertPickers.push(p);
+  h.userData.picker=p;
+}
+// -- unified GEO element gizmo: select a face/edge/vertex, then an axis gizmo
+// appears (1 arrow for a face along its normal, 2 for an edge, 3 for a vertex).
+// Lives in the scene (not geoGroup) so it can carry the brush's full
+// orientation via quaternion, reusing localAxisToThree like the whole-brush
+// move gizmo. Arrow refs are kept so each can be shown/hidden/reoriented.
+let geoSub='face';        // 'face' | 'edge' | 'vertex'
+let geoSelEl=null;        // selected element index within the current sub-mode, or null
+const geoGizmo=new THREE.Group(); geoGizmo.visible=false; scene.add(geoGizmo);
+const geoArrows={}; // comp -> {arrow, picker, baseDir}
+[{comp:'x',color:0xE8554E},{comp:'y',color:0x5BD15B},{comp:'z',color:0x4F9DFF}].forEach(ax=>{
+  // base dir = the local Unreal axis mapped into THREE (U2T of +axis)
+  const dir=ax.comp==='x'?new THREE.Vector3(1,0,0):ax.comp==='y'?new THREE.Vector3(0,0,-1):new THREE.Vector3(0,1,0);
+  const arrow=new THREE.ArrowHelper(dir,new THREE.Vector3(0,0,0),GZ*0.7,ax.color,GZ*0.2,GZ*0.12);
+  geoGizmo.add(arrow);
+  const pk=new THREE.Mesh(new THREE.CylinderGeometry(GZ*0.12,GZ*0.12,GZ*0.7,8),
+                           new THREE.MeshBasicMaterial({visible:false}));
+  pk.userData.vaxis=ax.comp; geoGizmo.add(pk);
+  geoArrows[ax.comp]={arrow, picker:pk, baseDir:dir.clone()};
+});
+const geoAxisPickers=[geoArrows.x.picker, geoArrows.y.picker, geoArrows.z.picker];
+// Which local axes an element can move along, and (for a face) the outward sign.
+// face: 1 axis (its normal) with sign; edge: the 2 axes perpendicular to it;
+// vertex: all 3. Returns {axes:[{comp,sign}], corners:[indices], face?:fd}
+function geoElement(){
+  const b=selected; const C=b.corners||cornersFromSize(b);
+  if(geoSub==='face'){
+    const fd=GEO_FACES[geoSelEl];
+    return {axes:[{comp:fd.axis,sign:fd.sign}], corners:fd.quad.slice(), face:fd, C};
+  }
+  if(geoSub==='edge'){
+    const ed=GEO_EDGES[geoSelEl];
+    const others=['x','y','z'].filter(a=>a!==ed.axis).map(comp=>({comp,sign:1}));
+    return {axes:others, corners:[ed.i,ed.j], edge:ed, C};
+  }
+  return {axes:[{comp:'x',sign:1},{comp:'y',sign:1},{comp:'z',sign:1}], corners:[geoSelEl], C};
+}
+// world-Three centre of an element's corners (local corners -> world)
+function geoElementCentreWorld(b, corners, C){
+  let lx=0,ly=0,lz=0; corners.forEach(i=>{lx+=C[i][0];ly+=C[i][1];lz+=C[i][2];});
+  const n=corners.length; lx/=n;ly/=n;lz/=n;
+  const w=rotUnreal([lx,ly,lz], b.yaw||0, 0, 0);
+  return U2T(w[0]+b.pos.x, w[1]+b.pos.y, w[2]+b.pos.z);
+}
+function geoFlat(b){ return Math.abs(b.pitch||0)<1e-6 && Math.abs(b.roll||0)<1e-6; }
+function geoActive(){ return gizmoMode==='geom' && selectedSet.size===1 && selected && selected.type==='box' && geoFlat(selected); }
+// local Unreal point -> Three local within geoGroup (group carries yaw+pos)
+function L2T(p){ return new THREE.Vector3(p[0], p[2], -p[1]); }
+function updateGeoHandles(){
+  const b=selected, C=b.corners||cornersFromSize(b);
+  geoGroup.position.copy(U2T(b.pos.x,b.pos.y,b.pos.z));
+  geoGroup.rotation.y=b.yaw||0;
+  const k=Math.max(0.35, orbit.dist/1100);
+  const fs=GZ*0.13*k, es=GZ*0.10*k, vs=GZ*0.11*k, ps=1.9; // handle sizes + picker inflation
+  const showFace=geoSub==='face', showEdge=geoSub==='edge', showVert=geoSub==='vertex';
+  GEO_FACES.forEach((f,fi)=>{
+    const q=f.quad.map(i=>C[i]);
+    const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,
+          cy=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4,
+          cz=(q[0][2]+q[1][2]+q[2][2]+q[3][2])/4;
+    const h=geoFaceHandles[fi], sel=showFace&&geoSelEl===fi;
+    h.visible=showFace; h.userData.picker.visible=showFace;
+    h.material.color.set(sel?0xF2F4F8:0xE8A33D);
+    h.position.copy(L2T([cx,cy,cz])); h.scale.setScalar(sel?fs*1.35:fs);
+    h.userData.picker.position.copy(h.position); h.userData.picker.scale.setScalar(fs*ps);
+  });
+  GEO_EDGES.forEach((ed,ei)=>{
+    const a=C[ed.i], c2=C[ed.j];
+    const h=geoEdgeHandles[ei], sel=showEdge&&geoSelEl===ei;
+    h.visible=showEdge; h.userData.picker.visible=showEdge;
+    h.material.color.set(sel?0xF2F4F8:0x46C7D0);
+    h.position.copy(L2T([(a[0]+c2[0])/2,(a[1]+c2[1])/2,(a[2]+c2[2])/2]));
+    h.scale.setScalar(sel?es*1.4:es);
+    h.userData.picker.position.copy(h.position); h.userData.picker.scale.setScalar(es*ps);
+  });
+  geoVertHandles.forEach((h,vi)=>{
+    const sel=showVert&&geoSelEl===vi;
+    h.visible=showVert; h.userData.picker.visible=showVert;
+    h.material.color.set(sel?0xF2F4F8:0xE85AD0);
+    h.position.copy(L2T(C[vi])); h.scale.setScalar(sel?vs*1.4:vs);
+    h.userData.picker.position.copy(h.position); h.userData.picker.scale.setScalar(vs*ps);
+  });
+  // unified element gizmo at the selected element (1/2/3 arrows by element type)
+  const showGizmo=geoSelEl!=null;
+  geoGizmo.visible=showGizmo;
+  if(showGizmo){
+    const el=geoElement();
+    geoGizmo.position.copy(geoElementCentreWorld(b, el.corners, C));
+    geoGizmo.quaternion.copy(brushThreeQuat(b));
+    geoGizmo.scale.setScalar(k);
+    // configure which arrows show; a face arrow flips to point outward
+    const active={}; el.axes.forEach(a=>active[a.comp]=a.sign);
+    ['x','y','z'].forEach(comp=>{
+      const g=geoArrows[comp], on=(comp in active);
+      g.arrow.visible=on; g.picker.visible=on;
+      if(on){
+        const sign=active[comp];
+        const dir=g.baseDir.clone().multiplyScalar(sign);
+        g.arrow.setDirection(dir);
+        g.arrow.setLength(GZ*0.7, GZ*0.2, GZ*0.12);
+        g.picker.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+        g.picker.position.copy(dir.clone().multiplyScalar(GZ*0.35));
+      }
+    });
+  }
+}
 
 function updateGizmo(){
-  if(!selectedSet.size){ gizmoRoot.visible=false; return; }
+  if(!selectedSet.size){ gizmoRoot.visible=false; geoGroup.visible=false; geoGizmo.visible=false; return; }
   gizmoRoot.visible=true;
   const c=selCenter(); gizmoRoot.position.copy(U2T(c.x,c.y,c.z));
   gizmoRoot.scale.setScalar(Math.max(0.35, orbit.dist/1100)); // keep roughly screen-sized
-  const yaw=selected.yaw||0;
-  // Size X/Y are LOCAL-space dimensions that rotate with the brush's yaw, so
-  // the scale handles must rotate too or they drift off the true edges —
-  // scaling a BSP brush is always a local-space operation, so it ignores the
-  // World/Local toggle. Move respects the toggle: World keeps arrows on the
-  // fixed world axes; Local rotates them to the brush's own facing.
-  scaleGroup.rotation.y = yaw;
-  moveGroup.rotation.y = (gizmoSpace==='local') ? yaw : 0;
+  // Scale handles always track the brush's own axes (scaling BSP is local),
+  // so they use the full brush orientation. Move respects the toggle: World =
+  // fixed world axes (identity), Local = full brush orientation (all 3 axes,
+  // not just yaw — so local move works on pitched/rolled brushes).
+  const q=brushThreeQuat(selected);
+  scaleGroup.quaternion.copy(q);
+  if(gizmoSpace==='local') moveGroup.quaternion.copy(q);
+  else moveGroup.quaternion.identity();
   moveGroup.visible=gizmoMode==='move';
   scaleGroup.visible=gizmoMode==='scale';
   rotateGroup.visible=gizmoMode==='rotate';
+  const geo=geoActive();
+  geoGroup.visible=geo;
+  if(geo) updateGeoHandles(); else geoGizmo.visible=false;
 }
 // closest parameter along an axis line to the pointer ray
 function axisParam(origin,dir,rc){
@@ -1203,12 +1641,23 @@ function axisParam(origin,dir,rc){
   return (b*e - d)/denom;
 }
 const rotatePlane=new THREE.Plane();
-function rotateAngleAt(px,py){
-  rotatePlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0,1,0), gizmoRoot.position);
+// Angle of the pointer within the plane of the given rotation ring, measured
+// in THREE space. yaw plane = XZ (normal +Y), pitch plane = XY (normal +Z),
+// roll plane = YZ (normal +X). The yaw branch is byte-identical to the old
+// single-ring behaviour so existing yaw drags are unchanged.
+function rotateAngleAt(px,py,axis){
+  let normal, comp;
+  if(axis==='pitch'){ normal=new THREE.Vector3(0,0,1); comp='pitch'; }
+  else if(axis==='roll'){ normal=new THREE.Vector3(1,0,0); comp='roll'; }
+  else { normal=new THREE.Vector3(0,1,0); comp='yaw'; }
+  rotatePlane.setFromNormalAndCoplanarPoint(normal, gizmoRoot.position);
   ray.setFromCamera(ndc(px,py), camera);
   const pt=new THREE.Vector3();
   if(!ray.ray.intersectPlane(rotatePlane, pt)) return null;
-  return Math.atan2(-(pt.z-gizmoRoot.position.z), pt.x-gizmoRoot.position.x);
+  const o=gizmoRoot.position;
+  if(comp==='yaw')   return Math.atan2(-(pt.z-o.z), pt.x-o.x);
+  if(comp==='pitch') return Math.atan2(pt.y-o.y, pt.x-o.x);
+  return Math.atan2(pt.z-o.z, pt.y-o.y); // roll
 }
 let gizmoDrag=null;
 function ndc(px,py){const r=el.getBoundingClientRect();return new THREE.Vector2(((px-r.left)/r.width)*2-1, -((py-r.top)/r.height)*2+1);}
@@ -1230,26 +1679,85 @@ function gizmoHitAxis(px,py){
     const obj=hits[0].object;
     return obj.userData.uniform ? {type:'uniform'} : {type:'scale', axis:obj.userData.axis};
   }
-  const hits=ray.intersectObject(rotatePicker,false);
-  return hits.length? {type:'rotate'} : null;
+  if(gizmoMode==='geom'){
+    if(!geoActive()) return null;
+    // grabbing an axis of the selected element's gizmo takes priority
+    if(geoSelEl!=null){
+      const ah=ray.intersectObjects(geoAxisPickers.filter(p=>p.visible),false);
+      if(ah.length) return {type:'geoaxis', comp:ah[0].object.userData.vaxis};
+    }
+    // otherwise tap a handle in the active sub-mode to SELECT that element
+    const pickers = geoSub==='face'?geoPickers.filter(p=>p.userData.geo.type==='gface')
+                 : geoSub==='edge'?geoPickers.filter(p=>p.userData.geo.type==='gedge')
+                 : geoVertPickers;
+    const hits=ray.intersectObjects(pickers,false);
+    if(!hits.length) return null;
+    const g=hits[0].object.userData.geo;
+    const idx = g.type==='gface'?g.fi : g.type==='gedge'?g.ei : g.vi;
+    return {type:'geosel', idx};
+  }
+  const hits=ray.intersectObjects(rotatePickers,false);
+  return hits.length? {type:'rotate', rotAxis:hits[0].object.userData.rotAxis} : null;
 }
 // Three-space unit direction -> the Unreal-space displacement it represents
 // (inverse of U2T). Lets a single rotated drag axis move pos.x AND pos.y
 // together, which is what "Local" space dragging actually needs.
 function threeDirToUnreal(d){ return {x:d.x, y:-d.z, z:d.y}; }
+// A brush's LOCAL Unreal axis (e.g. its own +X) as a world-space THREE unit
+// vector, using the SAME rotUnreal the geometry uses — so local-move arrows
+// and drag axes line up with the brush's actual faces at any pitch/yaw/roll.
+function localAxisToThree(b, ax){
+  const v = ax==='x'?[1,0,0]:ax==='y'?[0,1,0]:[0,0,1];
+  const r = rotUnreal(v, b.yaw||0, b.pitch||0, b.roll||0); // world Unreal dir
+  return new THREE.Vector3(r[0], r[2], -r[1]).normalize();  // -> Three (U2T dir)
+}
+// Full-rotation THREE quaternion for orienting gizmo visual groups to match a
+// brush. Built from the brush's three rotated basis vectors so it can't drift
+// from rotUnreal (which a separate Euler-in-Three composition easily would).
+function brushThreeQuat(b){
+  const X=localAxisToThree(b,'x'), Y=localAxisToThree(b,'y'), Z=localAxisToThree(b,'z');
+  // THREE basis: gizmo X uses brush +X, gizmo Y uses brush +Z (Three up),
+  // gizmo Z uses brush -Y — matching U2T's axis mapping.
+  const m=new THREE.Matrix4().makeBasis(X, Z, Y.clone().negate());
+  return new THREE.Quaternion().setFromRotationMatrix(m);
+}
 
 function gizmoStart(hit,px,py){
   const yaw=selected?selected.yaw||0:0;
+  if(hit.type==='geosel'){
+    geoSelEl=hit.idx;            // select element; its gizmo appears next frame
+    gizmoDrag=null; buildInspector();
+    return;
+  }
+  if(hit.type==='geoaxis'){
+    const b=selected; if(!b||geoSelEl==null) return;
+    const el=geoElement(), C=el.C;
+    const comp=hit.comp;
+    const axDef=el.axes.find(a=>a.comp===comp); if(!axDef) return;
+    // outward-signed drag direction (faces flip; edges/vertices are +axis)
+    const dir=localAxisToThree(b, comp).multiplyScalar(axDef.sign);
+    const origin=geoElementCentreWorld(b, el.corners, C);
+    ray.setFromCamera(ndc(px,py),camera);
+    gizmoDrag={type:'geoaxis', b, comp, sign:axDef.sign, dir, origin,
+               t0:axisParam(origin,dir,ray),
+               face:el.face||null, corners:el.corners.slice(),
+               baseCorners:(b.corners||cornersFromSize(b)).map(p=>p.slice()),
+               size:{...b.size}, pos:{...b.pos},
+               wasPristine:!b.corners};
+    return;
+  }
   if(hit.type==='rotate'){
-    gizmoDrag={type:'rotate', startAngle:rotateAngleAt(px,py),
-               items:[...selectedSet].map(b=>({b,yaw:b.yaw||0}))};
+    const ax=hit.rotAxis||'yaw';
+    gizmoDrag={type:'rotate', rotAxis:ax, startAngle:rotateAngleAt(px,py,ax),
+               items:[...selectedSet].map(b=>({b, ang:b[ax]||0}))};
     return;
   }
   if(hit.type==='uniform'){
     const sp=screenPos(gizmoRoot.position);
     const startDist=Math.max(20,Math.hypot(px-sp.x,py-sp.y));
     gizmoDrag={type:'uniform', screenOrigin:sp, startDist,
-               items:[...selectedSet].map(b=>({b,size:{...b.size}}))};
+               items:[...selectedSet].map(b=>({b,size:{...b.size},
+                 corners:b.corners?b.corners.map(p=>p.slice()):null}))};
     return;
   }
   ray.setFromCamera(ndc(px,py),camera);
@@ -1257,29 +1765,62 @@ function gizmoStart(hit,px,py){
   let dir=hit.axis.dir.clone();
   const useLocal=hit.type==='scale'||(hit.type==='move'&&gizmoSpace==='local');
   if(useLocal){
-    const c=Math.cos(yaw),s=Math.sin(yaw);
-    dir=new THREE.Vector3(dir.x*c+dir.z*s,dir.y,-dir.x*s+dir.z*c);
+    // brush's local axis (x/y/z) as a world-Three direction, full rotation
+    dir=localAxisToThree(selected, hit.axis.comp);
   }
   gizmoDrag={type:hit.type,ax:hit.axis,origin,dir,t0:axisParam(origin,dir,ray),
-             items:[...selectedSet].map(b=>({b,pos:{...b.pos},size:{...b.size}}))};
+             items:[...selectedSet].map(b=>({b,pos:{...b.pos},size:{...b.size},
+               corners:b.corners?b.corners.map(p=>p.slice()):null}))};
 }
 function gizmoMoveTo(px,py){
   if(!gizmoDrag||!selectedSet.size) return;
+  if(gizmoDrag.type==='geoaxis'){
+    if(gizmoDrag.t0==null) return;
+    ray.setFromCamera(ndc(px,py),camera);
+    const t=axisParam(gizmoDrag.origin,gizmoDrag.dir,ray);
+    if(t==null) return;
+    const b=gizmoDrag.b, ai=AXI[gizmoDrag.comp];
+    // delta is measured along the (outward-signed) drag dir
+    const delta=snap(t-gizmoDrag.t0);
+    if(gizmoDrag.face && gizmoDrag.wasPristine){
+      // pristine box + face push = asymmetric resize; exact CubeBuilder SURVIVES.
+      // dir points outward, so +delta grows. Reuse the proven size+centre math.
+      const fd=gizmoDrag.face;
+      const ns=Math.max(10,snap(gizmoDrag.size[fd.axis]+delta));
+      const actual=ns-gizmoDrag.size[fd.axis];
+      b.size[fd.axis]=ns;
+      const half=fd.sign*actual/2, yaw=b.yaw||0, c=Math.cos(yaw), s=Math.sin(yaw);
+      if(fd.axis==='z'){ b.pos.z=gizmoDrag.pos.z+half; }
+      else if(fd.axis==='x'){ b.pos.x=gizmoDrag.pos.x+half*c; b.pos.y=gizmoDrag.pos.y+half*s; }
+      else { b.pos.x=gizmoDrag.pos.x-half*s; b.pos.y=gizmoDrag.pos.y+half*c; }
+      buildMesh(b); buildInspector(); refreshHUD();
+      return;
+    }
+    // edited box (or edge/vertex): move the controlled corners along the local
+    // axis. dir is outward-signed, so the local-coord step is delta*sign.
+    const step=delta*gizmoDrag.sign;
+    const NC=gizmoDrag.baseCorners.map(p=>p.slice());
+    gizmoDrag.corners.forEach(i=>{ NC[i][ai]+=step; });
+    if(validateCorners(NC)){ b.corners=NC; buildMesh(b); buildInspector(); refreshHUD(); }
+    return;
+  }
   if(gizmoDrag.type==='rotate'){
-    const angle=rotateAngleAt(px,py); if(angle==null||gizmoDrag.startAngle==null) return;
+    const ax=gizmoDrag.rotAxis||'yaw';
+    const angle=rotateAngleAt(px,py,ax); if(angle==null||gizmoDrag.startAngle==null) return;
     const delta=angle-gizmoDrag.startAngle;
-    gizmoDrag.items.forEach(({b,yaw})=>{
-      b.yaw=snapDeg((yaw+delta)*180/Math.PI)*Math.PI/180; buildMesh(b);
+    gizmoDrag.items.forEach(({b,ang})=>{
+      b[ax]=snapDeg((ang+delta)*180/Math.PI)*Math.PI/180; buildMesh(b);
     });
     buildInspector(); refreshHUD(); return;
   }
   if(gizmoDrag.type==='uniform'){
     const cur=Math.max(20,Math.hypot(px-gizmoDrag.screenOrigin.x,py-gizmoDrag.screenOrigin.y));
     const ratio=cur/gizmoDrag.startDist;
-    gizmoDrag.items.forEach(({b,size})=>{
+    gizmoDrag.items.forEach(({b,size,corners})=>{
       b.size.x=Math.max(10,snap(size.x*ratio));
       b.size.y=Math.max(10,snap(size.y*ratio));
       b.size.z=Math.max(10,snap(size.z*ratio));
+      if(corners) b.corners=corners.map(p=>p.map(v=>v*ratio));
       buildMesh(b);
     });
     buildInspector(); refreshHUD(); return;
@@ -1298,8 +1839,14 @@ function gizmoMoveTo(px,py){
       buildMesh(b);
     });
   } else {
-    gizmoDrag.items.forEach(({b,size})=>{
-      b.size[gizmoDrag.ax.comp]=Math.max(10,snap(size[gizmoDrag.ax.comp]+delta*gizmoDrag.ax.scaleFactor));
+    gizmoDrag.items.forEach(({b,size,corners})=>{
+      const comp=gizmoDrag.ax.comp;
+      const ns=Math.max(10,snap(size[comp]+delta*gizmoDrag.ax.scaleFactor));
+      if(corners&&size[comp]>0){
+        const r=ns/size[comp], ai=AXI[comp];
+        b.corners=corners.map(p=>{const q=p.slice();q[ai]*=r;return q;});
+      }
+      b.size[comp]=ns;
       buildMesh(b);
     });
   }
@@ -1315,6 +1862,21 @@ document.querySelectorAll('#gizmoSeg button').forEach(btn=>{
   btn.onclick=()=>{
     gizmoMode=btn.dataset.mode;
     document.querySelectorAll('#gizmoSeg button').forEach(b=>b.classList.toggle('on', b===btn));
+    document.getElementById('geoSubSeg').style.display = gizmoMode==='geom' ? 'flex' : 'none';
+    if(gizmoMode!=='geom') geoSelEl=null;
+    if(gizmoMode==='geom'&&!geoActive()){
+      if(selectedSet.size===1&&selected&&selected.type==='box'&&!geoFlat(selected))
+        toast('GEO needs a flat box — reset pitch/roll to 0 first');
+      else toast('GEO: select a single box brush');
+    }
+  };
+});
+document.querySelectorAll('#geoSubSeg button').forEach(btn=>{
+  btn.onclick=()=>{
+    geoSub=btn.dataset.sub;
+    geoSelEl=null; // clear element selection when switching sub-mode
+    document.querySelectorAll('#geoSubSeg button').forEach(b=>b.classList.toggle('on', b===btn));
+    toast(`Tap a ${geoSub}, then drag an axis to move it`);
   };
 });
 
