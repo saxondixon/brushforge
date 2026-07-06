@@ -3,6 +3,48 @@
 All notable changes to BrushForge are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.14.1] — 2026-07-07
+### Fixed
+- Hardened the Web Worker fallback for sandboxed contexts (Claude's artifact iframe, some file:// setups). Blob-URL workers are often blocked there, and the failure isn't always a synchronous throw — the worker can construct, then fire an async error or silently never reply. Added an 8s watchdog on every pre-proven dispatch (falls back to the synchronous fold if no first reply lands), a `csgWorkerProven` flag so the watchdog only guards the unproven state, and unified all three failure modes through one `csgWorkerDied()` path.
+### Added
+- HUD line showing the active CSG mode (`async` / `computing…` / `sync`) so the live path is visible without the console.
+
+## [0.14.0] — 2026-07-07
+### Changed
+- CSG fold now runs in a Web Worker — edits are instant regardless of scene size; the ~3s rebuild no longer freezes the main thread. Extracted the fold into a pure `csgFoldScene()` (single source of truth); the worker script is assembled at runtime from the live functions via `Function.toString()`, so worker and main-thread code cannot drift. Verified bit-identical to the direct fold on the real scene in an isolated vm context. Stale combined mesh stays visible while computing; newer edits terminate and respawn in-flight folds. Automatic synchronous fallback if Worker/Blob is unavailable.
+
+## [0.13.2] — 2026-07-07
+### Fixed
+- OOM on the real LVHotelLobby scene (177 brushes). Root cause was a single non-convex `raw` import (a 175-poly geometry-mode staircase): building a BSP from a concave poly soup explodes combinatorially and exhausted a 2GB heap on one brush. Non-convex raws are now excluded from the combined solid (via `csgIsConvex`, cached) — they still render individually, stay editable, and export is unaffected (UE re-runs its own BSP on paste). Added a 4M-split budget per rebuild as a safety net: any future runaway aborts cleanly to individual-brush display instead of crashing the tab.
+
+## [0.13.1] — 2026-07-07
+### Fixed
+- OOM on open levels (one shared floor, everything touching = a single CSG island, so 0.13.0's partitioning couldn't help). BSP planes are infinite, so clipping against each new brush fragmented all geometry crossing its planes however distant, growing poly count superlinearly. Added `csgClipToBounded`: result polys AABB-disjoint from the clipping brush pass through unclipped (exact — same solid, fewer fragments). Poly growth is now roughly linear.
+
+## [0.13.0] — 2026-07-07
+### Changed
+- Optimized `rebuildCsg` with island partitioning: brushes are grouped into independent connected components by transitive AABB overlap and folded separately, then concatenated with no cross-clipping (exact — disjoint islands can't interact). ~35x faster at 800 spatially-separated brushes, roughly linear rather than quadratic out past 5000+.
+
+## [0.12.4] — 2026-07-07
+### Fixed
+- GPU memory leak crashing large scenes. THREE.js doesn't free geometry/material buffers on `scene.remove()` — they need explicit `.dispose()`, which none of the 6 mesh-replacement sites called (per-brush rebuild, undo/redo, scene load, New Scene, and the combined CSG mesh rebuilt on every edit). Added a `disposeMesh()` helper wired into all sites. Pre-existing bug, exposed by import making large scenes common.
+
+## [0.12.3] — 2026-07-07
+### Fixed
+- "Maximum call stack size exceeded" on large scenes. The BSP tree functions (`csgBuild`/`csgInvert`/`csgClipPolys`/`csgClipTo`/`csgAll`) were recursive, and recursion depth grew linearly with brush count. Converted all five to iterative (explicit work-stack) versions. Verified byte-identical output against the recursive originals across 9 union/subtract/mixed scenarios.
+
+## [0.12.2] — 2026-07-07
+### Fixed
+- Importing any `raw` brush crashed on commit. `facesFor()` computed `hx=size.x/2` unconditionally before the type check, but raw brushes carry no `b.size` (only `b.polys`). Fixed to derive `hx/hy/hz` only when size exists.
+
+## [0.12.1] — 2026-07-07
+### Fixed
+- Importing a large scene threw a `RangeError` and aborted the whole batch. Every shape-fit min/max used `Math.min(...arr)` / `Math.max(...arr)`, and spreading a large array into function arguments has an engine-enforced ceiling (lower on iPad's JavaScriptCore than V8). Replaced with reduce-based helpers; moved error handling inside the per-actor loop so one bad actor is skipped, not the batch.
+
+## [0.12.0] — 2026-07-07
+### Added
+- **Import from Unreal**: paste T3D copied from a UE4.27 viewport and reconstruct brushes. Exact fast-path via `CubeBuilder`/`CylinderBuilder`; otherwise the PolyList is geometrically fit against box/cyl/cone/ramp (tolerant of winding order and float noise). Geometry matching no primitive imports as a new `raw` brush type — exact polygon soup, position/rotation editable, no resize or GEO editing. Export is unaffected (UE re-runs its own BSP on paste).
+
 ## [0.11.0] — 2026-07-05
 
 ### Changed

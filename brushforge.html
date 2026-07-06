@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>BrushForge v0.11.2 — UE4.27 Blockout</title>
+<title>BrushForge v0.14.1 — UE4.27 Blockout</title>
 <style>
   :root{
     --bg:#101216; --panel:#181B22; --panel2:#1F232C; --line:#2A2F3A;
@@ -115,11 +115,11 @@
   .actions{display:flex;gap:8px;padding:0 14px 12px;}
   .actions .btn{flex:1;}
 
-  /* Export modal */
-  #exportOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);
+  /* Export / Import modals */
+  #exportOverlay,#importOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);
                  z-index:30;display:none;align-items:flex-end;justify-content:center;}
-  #exportOverlay.open{display:flex;}
-  #drawer{background:var(--panel);border-radius:20px 20px 0 0;border-top:2px solid var(--add);
+  #exportOverlay.open,#importOverlay.open{display:flex;}
+  #drawer,#importDrawer{background:var(--panel);border-radius:20px 20px 0 0;border-top:2px solid var(--add);
           width:100%;max-height:82vh;display:flex;flex-direction:column;
           padding-bottom:env(safe-area-inset-bottom);}
   .dhead{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
@@ -138,7 +138,7 @@
   .diag-bar button{font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--line);
                     border-radius:7px;background:var(--panel);color:var(--dim);}
   .diag-bar button:active{border-color:var(--add);color:var(--add);}
-  pre#t3d, textarea#t3d{margin:0;padding:10px 12px;overflow:auto;-webkit-overflow-scrolling:touch;
+  pre#t3d, textarea#t3d, textarea#importText{margin:0;padding:10px 12px;overflow:auto;-webkit-overflow-scrolling:touch;
           font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim);
           white-space:pre;max-height:22vh;background:transparent;border:0;
           width:100%;resize:none;outline:none;}
@@ -276,6 +276,7 @@
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1.5"/><circle cx="3" cy="12" r="1.5"/><circle cx="3" cy="18" r="1.5"/></svg>
     </button>
     <button id="scenesBtn" class="btn">Scenes</button>
+    <button id="importBtn" class="btn">Import ↙</button>
     <button id="exportBtn" class="btn primary">Export ↗</button>
   </div>
 
@@ -353,6 +354,31 @@
         </div>
       </div>
     </div>
+
+    <div id="importOverlay">
+      <div id="importDrawer">
+        <div class="dhead">
+          <span class="swatch" style="background:var(--sub)"></span>
+          <div class="ititle">Import from Unreal <small id="icount"></small></div>
+          <button id="iclose" title="Close">✕</button>
+        </div>
+        <div class="dhint">
+          Paste T3D text copied from a UE4.27 viewport (Ctrl+C on selected actors), then tap <b>Parse</b>.<br>
+          Box always reconstructs exactly. Cylinder/cone/ramp reconstruct if the shape matches; anything else imports as exact polygons (position/rotation only, no resize).
+        </div>
+        <div class="diag">
+          <div class="diag-bar">
+            <span id="importInfo">—</span>
+            <button id="importParseBtn">Parse</button>
+          </div>
+          <textarea id="importText" placeholder="Paste T3D here…" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+        </div>
+        <div id="importSummary" class="dhint" style="display:none"></div>
+        <div class="dactions">
+          <button class="btn primary" id="importCommitBtn" disabled>Add to Scene</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="insp">
@@ -391,6 +417,200 @@
    (Y up) only for rendering; export uses raw Unreal coords.
    ------------------------------------------------------------
    CHANGELOG
+   0.14.1 Harden the 0.14.0 worker fallback for sandboxed contexts (Claude's
+          artifact iframe, some file:// setups). Blob-URL Workers are often
+          blocked there, and the failure isn't always a synchronous throw —
+          the worker can construct fine, then either fire an async error or
+          just never reply. Added: (1) a watchdog on every pre-proven
+          dispatch — if no first reply lands within 8s, the worker is
+          declared dead and the sync fold runs, so the preview always
+          appears; (2) a csgWorkerProven flag so the watchdog only guards
+          the unproven state and never interferes once the worker has
+          returned at least once; (3) unified all three failure modes
+          (construct-throw, async onerror, silent no-reply) through one
+          csgWorkerDied() path; (4) a HUD line showing the active CSG mode
+          (async / computing… / sync) so the path is visible without the
+          console. Verified with a worker-lifecycle state-machine harness
+          (14 assertions) covering all failure modes + supersede. Behavior
+          in Claude's preview: silently uses the sync path (correct geometry,
+          old ~3s blocking latency); on iPad from Files/home-screen it's a
+          real origin, so the async worker runs. No geometry/export change.
+   0.14.0 Async CSG: the fold now runs in a Web Worker, so edits are
+          instant regardless of scene size — the ~3s rebuild on the real
+          LVHotelLobby scene no longer freezes the main thread. Two-phase:
+          (1) extracted the fold into pure csgFoldScene(brushList) →
+          {polys, excludedIds} (no DOM/THREE/globals), proven no-op across
+          all five suites before any worker code landed; (2) worker
+          plumbing on top. Single source of truth preserved: the worker
+          script is assembled at runtime from the LIVE functions via
+          Function.toString() (csgWorkerSource), so the worker cannot
+          drift from the main-thread code — verified bit-identical output
+          on the real scene in an isolated vm context, which also proves
+          the dependency list is complete (any missing function throws).
+          UX: the previous combined mesh stays visible while the worker
+          computes (stale-but-useful preview, no blank flash); a newer
+          edit terminates and respawns an in-flight worker rather than
+          letting it burn seconds on an obsolete scene (seq-tagged
+          replies; stale results ignored). Budget aborts surface from the
+          worker as {ok:false, budget:true} → same individual-brush
+          fallback + toast as before. If Worker/Blob construction fails
+          (some file:// contexts), everything permanently falls back to
+          the synchronous path — identical results, old latency. Display
+          only; export untouched. Remaining latency: the grey combined
+          solid still refreshes ~3s after an edit on this scene — it just
+          no longer blocks anything. If that refresh lag matters, the next
+          lever is prefix/checkpoint caching of the fold; flagged, not
+          built.
+   0.13.2 Fix OOM — root-caused against Saxon's real LVHotelLobby scene
+          (177 brushes), which reproduced the exact crash in node: 2GB
+          heap exhausted. Not scale, not fragmentation — a single brush.
+          The scene has 4 'raw' imports authored in UE geometry mode (two
+          175-poly staircase-like meshes among them), and they're NON-
+          CONVEX. csgNode() on a concave poly soup explodes combinatorially:
+          every concave face's INFINITE plane crosses many other faces,
+          fragments recurse into both subtrees — one such brush alone ate
+          2GB building its OWN tree, where the 0.13.1 AABB bound can't help
+          (everything is inside its own AABB). Two-part fix: (1) convexity
+          gate — csgIsConvex() tests each raw brush once (cached; raw
+          geometry is immutable); convex raws participate in CSG normally
+          (convex = provably zero self-splits), non-convex raws are
+          excluded from the combined solid but still render individually
+          (updateBrushFills keeps their fill), remain selectable/movable,
+          and EXPORT IS UNTOUCHED — UE runs its own BSP on paste. (2)
+          Safety net — a 4M split budget per rebuild; if any future input
+          still triggers runaway splitting, the rebuild aborts cleanly to
+          individual-brush display with a toast instead of OOMing the tab.
+          Verified: the full real scene now imports and folds in ~2.9s /
+          45MB heap under a 1GB cap (was: OOM at 2GB); exactly the 4
+          non-convex raws excluded; a synthetic convex raw still
+          participates and gets carved by subtracts; the budget throws a
+          clean catchable error when tripped. Display only; export and
+          all four prior test suites unaffected.
+   0.13.1 Fix OOM on OPEN levels — 0.13.0's island partitioning is useless
+          when everything touches (one shared floor slab chains the whole
+          scene into a single island, which is exactly Saxon's level shape).
+          The real memory bomb: BSP planes are INFINITE. Clipping the
+          accumulated result against a new brush's tree splits every result
+          polygon crossing any of the brush's 6 infinite planes — including
+          geometry hundreds of units away the brush can't affect. Each brush
+          shredded the floor into fragments, the next brush shredded the
+          fragments, poly count grew superlinearly until OOM. Fix:
+          csgClipToBounded — result polys whose AABB is disjoint from the
+          brush's AABB pass through UNCLIPPED. Exact, not approximate:
+          clipping only removes material inside the brush's solid (⊂ its
+          AABB) and only splits along its planes; a disjoint poly's post-
+          clip coverage is identical, so skipping changes only the
+          decomposition (same solid, fewer/larger polys). The small side
+          (brush vs accumulated tree) still clips fully — a brush can sit
+          deep inside the solid far from any face, so classifying it needs
+          the whole tree; only the big side is safely boundable. Verified:
+          volume + per-plane surface area identical to unbounded across 13
+          scenarios including floor-straddling subtracts; poly growth now
+          ~linear (plain: 2966 polys @201 brushes, superlinear; bounded:
+          6104 @801). 801-brush single-island open level: 770ms rebuild.
+          Composes with 0.13.0 islands. Equivalence tests moved from exact-
+          poly comparison to solid-equivalence (volume + area-per-plane),
+          since the decomposition legitimately differs now. No-arg
+          csgUnion/csgSubtract remain byte-identical (verified). Display
+          only — export untouched.
+   0.13.0 Optimize rebuildCsg(): still crashing on large scenes after 0.12.4
+          (that fix was real but insufficient — the algorithm itself is
+          exact-but-quadratic). Root cause: chaining csgUnion/csgSubtract
+          clips every brush against the ENTIRE accumulated tree so far, so
+          cost grows ~O(n^2) with brush count even when most brushes are
+          nowhere near each other — exactly the shape of a real level (many
+          spatially separate rooms). Partition active brushes into
+          independent islands by transitive AABB overlap first, run the
+          exact same sequential CSG within each island (relative order
+          preserved), then concatenate island results directly with NO
+          cross-clipping. This is exact, not approximate: an island's
+          accumulated solid is always contained within the union of its own
+          brushes' AABBs, which by construction don't overlap any other
+          island's, so disjoint islands provably can't interact. An earlier
+          attempt at an inline per-step fast path (checking each new brush
+          against one running merged bbox) only gave ~2x, because a single
+          merged box grows to engulf the whole level after a few brushes —
+          islands give ~36x at 800 brushes and hold up at 5000+ (roughly
+          linear, not quadratic). Verified byte-identical output against the
+          original whole-scene chain across 9 scenarios (overlapping,
+          disjoint, mixed) using the actual shipped rebuildCsg code extracted
+          from the file, not a hand-copy. csgUnion/csgSubtract themselves are
+          untouched — this only changes when they get called.
+   0.12.4 Fix: "lack of memory" crash on large scenes. Root cause: THREE.js
+          does NOT free GPU buffers (VBOs) when scene.remove() detaches a
+          mesh — geometry/material need .dispose() explicitly, and none of
+          the 6 sites that replace meshes wholesale (per-brush rebuild on
+          every edit, undo/redo restore, scene load, New Scene, and —worst
+          of all— the combined CSG mesh rebuilt on every debounced edit)
+          ever called it. Pre-existing bug, not something 0.12.x introduced,
+          but importing a large scene and then editing it is exactly the
+          workload that leaks fast: hundreds of brushes' worth of buffers
+          per edit, repeated every ~200ms debounce. Added a disposeMesh()
+          helper (handles array materials, null-safe) and wired it into all
+          6 sites. Known follow-on to watch: pushHistory() still keeps up
+          to 60 full-scene JSON snapshots for undo — bounded (not a leak,
+          doesn't grow with session length) but a large imported scene with
+          many 'raw' brushes means each snapshot itself is bigger, so total
+          undo-buffer memory scales with scene size. Not touched this pass;
+          flag if it becomes the next bottleneck.
+   0.12.3 Fix: "Maximum call stack size exceeded" on large scenes (this was
+          a THIRD distinct bug in the same area, not the 0.12.1/0.12.2
+          fixes recurring). Root cause: csgBuild/csgInvert/csgClipPolys/
+          csgClipTo/csgAll are all tree recursion, and rebuildCsg() folds
+          brushes into the accumulated BSP tree one at a time — so tree
+          depth (and recursion depth) grows LINEARLY with brush count.
+          Confirmed via node: the old recursive csgInvert overflows by
+          depth ~20000 even in Node's generous stack; iPad Safari's
+          JavaScriptCore stack is markedly shallower, so a few hundred
+          imported brushes was enough in practice. Converted all five
+          functions to iterative (explicit work-stack) — csgClipPolys
+          needed a post-order frame stack to preserve its exact original
+          semantics (missing node.front keeps the UNCLIPPED list; missing
+          node.back yields EMPTY — getting this backwards silently corrupts
+          every CSG result, not just deep ones). Verified byte-identical
+          output against the original recursive functions across 5 union/
+          subtract/mixed-shape scenarios, then confirmed the new versions
+          survive a depth-60000 synthetic tree in <1s where the originals
+          had already overflowed by depth-20000. Pure internal refactor —
+          T3D export unaffected (doesn't touch CSG display at all).
+   0.12.2 Fix: importing any 'raw' brush (geometry that didn't fit box/cyl/
+          cone/ramp — exactly what a large/complex real-UE scene produces)
+          crashed immediately on commit. Cause: facesFor() computed
+          hx=size.x/2 unconditionally in the same const statement as the
+          type check, before the type==='raw' branch (added in 0.12.0) ever
+          ran — raw brushes have no b.size at all (only b.polys), so this
+          threw regardless of which branch would've handled it. Fixed by
+          only deriving hx/hy/hz when size exists. This is what the 0.12.1
+          error report actually was — not the RangeError that fix targeted,
+          a different bug in the same feature. Root-caused via a fuzz test
+          that reproduces commitImport's exact brush-construction logic and
+          runs it through the real facesFor(), instead of only checking
+          parseT3D's output shape — that pipeline gap is why 0.12.0/0.12.1
+          shipped without catching this; the new test fails against the
+          pre-fix code with the identical production error message and
+          passes clean after.
+   0.12.1 Fix: importing a large scene threw and silently aborted the whole
+          batch. Root cause: every shape-fit min/max used Math.min(...arr)/
+          Math.max(...arr) — spreading an array into function arguments has
+          an engine-enforced ceiling (V8 ~65k, iPad Safari/JavaScriptCore
+          lower), so any single actor with a large PolyList (a complex
+          hand-edited BSP brush) threw RangeError and the one try/catch
+          around the whole parse discarded everything, good actors included.
+          Replaced every spread min/max with a plain reduce (no ceiling) and
+          moved error handling inside the per-actor loop, so one bad actor
+          is now skipped with a reported reason instead of taking the batch
+          down. Verified with a 200k-vertex synthetic fan (previously threw,
+          now imports as raw) and a mixed-batch test with one malformed
+          actor between two good ones (both good ones now survive).
+   0.12.0 Import from Unreal: paste T3D copied from a UE4.27 viewport and
+          reconstruct brushes. CubeBuilder/CylinderBuilder give an exact fast
+          path; otherwise the PolyList is geometrically fit against box/cyl/
+          cone/ramp (tolerant of winding order + float noise). Anything that
+          doesn't match becomes a new 'raw' brush type: exact polygon soup,
+          position/rotation only, no resize or GEO editing — same PolyList-
+          only export path already used for edited boxes and ramp. Verified
+          round-trip against our own export for all four primitives plus a
+          hand-authored non-primitive shape (node test, not eyeballed).
    0.11.2 Fix: display was MIRRORED relative to UE (left/right flipped) — a
           vertex moved on the right appeared on the left after paste. Root
           cause: U2T mapped left-handed Unreal into Three's right-handed space
@@ -467,7 +687,7 @@
    ============================================================ */
 
 // ---- version ----
-const VERSION = "0.11.2";
+const VERSION = "0.14.1";
 
 // ---- config ----
 const SNAP = {value:10};
@@ -491,7 +711,7 @@ function pushHistory(){
 }
 function applySnapshot(snap){
   const data=JSON.parse(snap);
-  brushes.forEach(b=>{scene.remove(b.mesh);scene.remove(b.edges);});
+  brushes.forEach(b=>{scene.remove(b.mesh);disposeMesh(b.mesh);scene.remove(b.edges);disposeMesh(b.edges);});
   brushes.length=0;
   data.forEach(d=>{brushes.push(d);buildMesh(d);});
   nextId=brushes.reduce((m,b)=>Math.max(m,b.id),0)+1;
@@ -647,7 +867,8 @@ function validateCorners(C){
 // OUTSIDE (right-hand rule -> outward normal), matching UE4.27's BSP
 // convention. Normals are DERIVED from winding so the two can't disagree.
 function facesFor(b, opts){
-  const {type,size}=b, hx=size.x/2, hy=size.y/2, hz=size.z/2;
+  const {type,size}=b;
+  const hx=size?size.x/2:0, hy=size?size.y/2:0, hz=size?size.z/2:0;
   const F=[]; // each: [ [x,y,z], ... ] local, CCW outward
   if(type==='box'){
     if(b.corners){
@@ -681,6 +902,11 @@ function facesFor(b, opts){
     F.push([E,B,C,G]);   // slope   (+X,+Z)
     F.push([A,B,E]);     // side    -Y
     F.push([D,G,C]);     // side    +Y
+  } else if(type==='raw'){
+    // Imported geometry that didn't fit box/cyl/cone/ramp — exact polygon
+    // soup, already re-centered on its own bbox at import time. No size/hx
+    // etc. apply; position + rotation are the only handles.
+    (b.polys||[]).forEach(face=>F.push(face.map(p=>p.slice())));
   }
   // Rotate then translate -> world Unreal coords.
   // EXPORT path keeps geometry local (centered at origin); position/rotation
@@ -719,9 +945,24 @@ function normalOf(face){
   const L=Math.hypot(n[0],n[1],n[2])||1; return [n[0]/L,n[1]/L,n[2]/L];
 }
 
+// THREE.js does NOT free GPU buffers (VBOs) when scene.remove() detaches an
+// object — geometry/material need .dispose() explicitly, or they leak until
+// context loss. Every regeneration site (per-brush mesh rebuild, undo/redo
+// restore, scene load/new, and the combined CSG mesh rebuilt on every
+// debounced edit) replaces objects wholesale, so without this every edit on
+// a large scene leaks GPU memory. Root cause of "large scene crashes with
+// lack of memory" — pre-existing, exposed by import making big scenes easy.
+function disposeMesh(obj){
+  if(!obj) return;
+  if(obj.geometry) obj.geometry.dispose();
+  if(obj.material){
+    if(Array.isArray(obj.material)) obj.material.forEach(m=>m.dispose());
+    else obj.material.dispose();
+  }
+}
 // build / rebuild Three mesh straight from the export polygons (display == export)
 function buildMesh(b){
-  if(b.mesh){scene.remove(b.mesh);} if(b.edges){scene.remove(b.edges);}
+  if(b.mesh){scene.remove(b.mesh);disposeMesh(b.mesh);} if(b.edges){scene.remove(b.edges);disposeMesh(b.edges);}
   const faces=facesFor(b);
   const pos=[],nor=[];
   faces.forEach(face=>{
@@ -751,7 +992,7 @@ function buildMesh(b){
   b.mesh.visible=vis; b.edges.visible=vis;
 }
 
-const TYPE_NAMES={box:'Box',cyl:'Cylinder',cone:'Cone',ramp:'Ramp'};
+const TYPE_NAMES={box:'Box',cyl:'Cylinder',cone:'Cone',ramp:'Ramp',raw:'Imported'};
 function defaultName(type,id){ return `${TYPE_NAMES[type]||type} ${id}`; }
 
 function addBrush(type){
@@ -783,7 +1024,7 @@ function deleteBrush(b){
   if(!targets.length) return;
   pushHistory();
   targets.forEach(x=>{
-    scene.remove(x.mesh); scene.remove(x.edges);
+    scene.remove(x.mesh); disposeMesh(x.mesh); scene.remove(x.edges); disposeMesh(x.edges);
     const idx=brushes.indexOf(x); if(idx>=0) brushes.splice(idx,1);
     selectedSet.delete(x);
   });
@@ -821,7 +1062,7 @@ function selectAll(){
 const ibody=document.getElementById('ibody');
 const ititle=document.getElementById('ititle');
 const iswatch=document.getElementById('iswatch');
-const NAMES={box:'Box',cyl:'Cylinder',cone:'Cone',ramp:'Ramp'};
+const NAMES={box:'Box',cyl:'Cylinder',cone:'Cone',ramp:'Ramp',raw:'Imported'};
 
 function buildInspector(){
   ibody.innerHTML='';
@@ -905,7 +1146,12 @@ function buildInspector(){
   ibody.append(rotField('Roll','roll'));
 
   // SIZE group — these RESIZE the brush
-  if(b.type==='box'&&b.corners){
+  if(b.type==='raw'){
+    ibody.append(sec('Geometry — imported'));
+    const note=document.createElement('div'); note.className='field full';
+    note.innerHTML='<label style="text-transform:none;letter-spacing:0">Didn\'t match a box/cylinder/cone/ramp on import — kept as exact polygons. Position and rotation only; no resize or GEO editing.</label>';
+    ibody.append(note);
+  } else if(b.type==='box'&&b.corners){
     // Size fields would fight the corners — replace with a note + reset.
     ibody.append(sec('Geometry — edited (faces/edges moved)'));
     const note=document.createElement('div'); note.className='field full';
@@ -955,8 +1201,12 @@ function buildInspector(){
 // ---- HUD ----
 function refreshHUD(){
   const a=brushes.filter(b=>b.op==='add').length, s=brushes.length-a;
+  let csgLine='';
+  if(csgWorkerFailed) csgLine='<br><span style="color:#8B93A3">csg</span> sync';
+  else if(csgInFlight) csgLine='<br><span style="color:#8B93A3">csg</span> computing…';
+  else if(csgWorkerProven) csgLine='<br><span style="color:#8B93A3">csg</span> async';
   document.getElementById('hud').innerHTML=
-    `<b>brushes</b> ${brushes.length}<br><span style="color:#E8A33D">add ${a}</span> · <span style="color:#46C7D0">sub ${s}</span><br><b>snap</b> ${SNAP.value} uu · ${ROT_SNAP.value}°`;
+    `<b>brushes</b> ${brushes.length}<br><span style="color:#E8A33D">add ${a}</span> · <span style="color:#46C7D0">sub ${s}</span><br><b>snap</b> ${SNAP.value} uu · ${ROT_SNAP.value}°${csgLine}`;
 }
 
 // ---- T3D export ----
@@ -1055,6 +1305,199 @@ function buildT3D(list){
   return t.replace(/\r?\n/g,'\r\n');
 }
 
+// ---- T3D import ----
+/* Paste-from-Unreal reconstruction. Parses "Begin Actor Class=/Script/
+   Engine.Brush ... End Actor" blocks (from a UE4.27 viewport copy, or our
+   own Export). For each actor: read RelativeLocation/RelativeRotation/
+   BrushType, try an exact builder fast-path (CubeBuilder, CylinderBuilder),
+   else geometrically fit the PolyList against box/cyl/cone/ramp (tolerant of
+   arbitrary winding start and float noise), else fall back to a 'raw' brush
+   — exact polygon soup, position+rotation only, no parametric editing (same
+   PolyList-only path already used for edited boxes/ramp). All local geometry
+   is re-centered on its own bbox centroid so b.pos is always the gizmo pivot. */
+const IMPORT_EPS = 0.6; // uu tolerance for shape-fit comparisons
+// Math.min(...arr)/Math.max(...arr) spread every element as a function
+// argument — JS engines cap that count (V8 ~65k, JavaScriptCore/iPad Safari
+// noticeably lower), so a big hand-authored BSP brush with a large PolyList
+// throws RangeError here on exactly the "large scene" pastes we care about.
+// Plain reduce has no such ceiling.
+function arrMin(arr){ let m=Infinity; for(let i=0;i<arr.length;i++) if(arr[i]<m) m=arr[i]; return m; }
+function arrMax(arr){ let m=-Infinity; for(let i=0;i<arr.length;i++) if(arr[i]>m) m=arr[i]; return m; }
+function importDedupe(pts, eps = 0.05) {
+  const out = [];
+  for (const p of pts) {
+    if (!out.some(q => Math.abs(q[0] - p[0]) < eps && Math.abs(q[1] - p[1]) < eps && Math.abs(q[2] - p[2]) < eps)) out.push(p);
+  }
+  return out;
+}
+function importAvg(arr) { return arr.reduce((a, b) => a + b, 0) / (arr.length || 1); }
+function importClosePt(a, b, eps = 0.05) { return Math.abs(a[0] - b[0]) < eps && Math.abs(a[1] - b[1]) < eps && Math.abs(a[2] - b[2]) < eps; }
+function fitBox(faces) {
+  if (faces.length !== 6 || !faces.every(f => f.length === 4)) return null;
+  const corners = importDedupe(faces.flat());
+  if (corners.length !== 8) return null;
+  const xs = corners.map(c => c[0]), ys = corners.map(c => c[1]), zs = corners.map(c => c[2]);
+  const xmin = arrMin(xs), xmax = arrMax(xs);
+  const ymin = arrMin(ys), ymax = arrMax(ys);
+  const zmin = arrMin(zs), zmax = arrMax(zs);
+  const ok = corners.every(c =>
+    (Math.abs(c[0] - xmin) < IMPORT_EPS || Math.abs(c[0] - xmax) < IMPORT_EPS) &&
+    (Math.abs(c[1] - ymin) < IMPORT_EPS || Math.abs(c[1] - ymax) < IMPORT_EPS) &&
+    (Math.abs(c[2] - zmin) < IMPORT_EPS || Math.abs(c[2] - zmax) < IMPORT_EPS));
+  if (!ok) return null;
+  return { type: 'box', size: { x: xmax - xmin, y: ymax - ymin, z: zmax - zmin }, center: [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2] };
+}
+function fitCyl(faces) {
+  const n = faces.length;
+  const big = faces.filter(f => f.length > 4);
+  const quadCount = faces.filter(f => f.length === 4).length;
+  if (big.length !== 2 || big[0].length !== big[1].length) return null;
+  const sides = big[0].length;
+  if (quadCount !== sides || quadCount !== n - 2) return null;
+  const [cap1, cap2] = big;
+  const z1 = importAvg(cap1.map(p => p[2])), z2 = importAvg(cap2.map(p => p[2]));
+  if (!cap1.every(p => Math.abs(p[2] - z1) < IMPORT_EPS) || !cap2.every(p => Math.abs(p[2] - z2) < IMPORT_EPS)) return null;
+  if (Math.abs(z1 - z2) < 1) return null;
+  const all = cap1.concat(cap2);
+  const cx = importAvg(all.map(p => p[0])), cy = importAvg(all.map(p => p[1]));
+  const rx = arrMax(cap1.map(p => Math.abs(p[0] - cx))), ry = arrMax(cap1.map(p => Math.abs(p[1] - cy)));
+  const rx2 = arrMax(cap2.map(p => Math.abs(p[0] - cx))), ry2 = arrMax(cap2.map(p => Math.abs(p[1] - cy)));
+  if (Math.abs(rx - rx2) > IMPORT_EPS || Math.abs(ry - ry2) > IMPORT_EPS) return null;
+  return { type: 'cyl', size: { x: rx * 2, y: ry * 2, z: Math.abs(z2 - z1) }, sides, center: [cx, cy, (z1 + z2) / 2] };
+}
+function fitCone(faces) {
+  const n = faces.length;
+  const bases = faces.filter(f => f.length >= 5);
+  const tris = faces.filter(f => f.length === 3);
+  if (bases.length !== 1 || tris.length !== n - 1 || tris.length !== bases[0].length) return null;
+  const base = bases[0], sides = base.length;
+  const zbase = importAvg(base.map(p => p[2]));
+  if (!base.every(p => Math.abs(p[2] - zbase) < IMPORT_EPS)) return null;
+  const candidates = importDedupe(tris.flat());
+  let apex = null;
+  for (const c of candidates) {
+    if (tris.every(t => t.some(p => importClosePt(p, c, IMPORT_EPS)))) { apex = c; break; }
+  }
+  if (!apex || Math.abs(apex[2] - zbase) < 1) return null;
+  const cx = importAvg(base.map(p => p[0])), cy = importAvg(base.map(p => p[1]));
+  if (Math.abs(apex[0] - cx) > IMPORT_EPS || Math.abs(apex[1] - cy) > IMPORT_EPS) return null;
+  const rx = arrMax(base.map(p => Math.abs(p[0] - cx))), ry = arrMax(base.map(p => Math.abs(p[1] - cy)));
+  return { type: 'cone', size: { x: rx * 2, y: ry * 2, z: Math.abs(apex[2] - zbase) }, sides, center: [cx, cy, (zbase + apex[2]) / 2] };
+}
+function fitRamp(faces) {
+  if (faces.length !== 5) return null;
+  const counts = faces.map(f => f.length).sort().join(',');
+  if (counts !== '3,3,4,4,4') return null;
+  const verts = importDedupe(faces.flat());
+  if (verts.length !== 6) return null;
+  const zs = verts.map(p => p[2]);
+  const zmin = arrMin(zs), zmax = arrMax(zs);
+  const lo = verts.filter(p => Math.abs(p[2] - zmin) < IMPORT_EPS);
+  const hi = verts.filter(p => Math.abs(p[2] - zmax) < IMPORT_EPS);
+  if (lo.length !== 4 || hi.length !== 2) return null;
+  const xs = verts.map(p => p[0]), ys = verts.map(p => p[1]);
+  const xmin = arrMin(xs), xmax = arrMax(xs), ymin = arrMin(ys), ymax = arrMax(ys);
+  const cornerOk = lo.every(p => (Math.abs(p[0] - xmin) < IMPORT_EPS || Math.abs(p[0] - xmax) < IMPORT_EPS) && (Math.abs(p[1] - ymin) < IMPORT_EPS || Math.abs(p[1] - ymax) < IMPORT_EPS));
+  if (!cornerOk) return null;
+  // Our ramp always rises away from the "back" edge at -X (top verts at xmin).
+  // A shape with its high edge at +X is a mirrored ramp we don't model —
+  // treat as unrecognized rather than silently misrepresent it.
+  if (!hi.every(p => Math.abs(p[0] - xmin) < IMPORT_EPS)) return null;
+  return { type: 'ramp', size: { x: xmax - xmin, y: ymax - ymin, z: zmax - zmin }, center: [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2] };
+}
+function fitPrimitive(faces) { return fitBox(faces) || fitCyl(faces) || fitCone(faces) || fitRamp(faces) || null; }
+function importParseVec3(str, ax, ay, az) {
+  const rx = new RegExp(ax + '=([+-]?[\\d.]+)').exec(str);
+  const ry = new RegExp(ay + '=([+-]?[\\d.]+)').exec(str);
+  const rz = new RegExp(az + '=([+-]?[\\d.]+)').exec(str);
+  return { x: rx ? parseFloat(rx[1]) : 0, y: ry ? parseFloat(ry[1]) : 0, z: rz ? parseFloat(rz[1]) : 0 };
+}
+function importParsePolyList(actorText) {
+  const plm = /Begin PolyList([\s\S]*?)End PolyList/.exec(actorText);
+  if (!plm) return [];
+  const faces = [];
+  const polyRe = /Begin Polygon([\s\S]*?)End Polygon/g;
+  let pm;
+  while ((pm = polyRe.exec(plm[1]))) {
+    const vertRe = /Vertex\s+([+-]?[\d.]+),([+-]?[\d.]+),([+-]?[\d.]+)/g;
+    const verts = []; let vm;
+    while ((vm = vertRe.exec(pm[1]))) verts.push([parseFloat(vm[1]), parseFloat(vm[2]), parseFloat(vm[3])]);
+    if (verts.length >= 3) faces.push(verts);
+  }
+  return faces;
+}
+function importParseBuilder(actorText) {
+  let m = /Begin Object Class=\/Script\/UnrealEd\.CubeBuilder Name="([^"]+)"/.exec(actorText);
+  if (m) {
+    const bm = new RegExp(`Begin Object Name="${m[1]}"([\\s\\S]*?)End Object`).exec(actorText);
+    const body = bm ? bm[1] : '';
+    const gx = /^\s*X=([+-]?[\d.]+)/m.exec(body), gy = /^\s*Y=([+-]?[\d.]+)/m.exec(body), gz = /^\s*Z=([+-]?[\d.]+)/m.exec(body);
+    return { kind: 'box', size: { x: gx ? parseFloat(gx[1]) : 200, y: gy ? parseFloat(gy[1]) : 200, z: gz ? parseFloat(gz[1]) : 200 } };
+  }
+  m = /Begin Object Class=\/Script\/UnrealEd\.CylinderBuilder Name="([^"]+)"/.exec(actorText);
+  if (m) {
+    const bm = new RegExp(`Begin Object Name="${m[1]}"([\\s\\S]*?)End Object`).exec(actorText);
+    const body = bm ? bm[1] : '';
+    const gz = /^\s*Z=([+-]?[\d.]+)/m.exec(body), gr = /^\s*OuterRadius=([+-]?[\d.]+)/m.exec(body), gs = /^\s*Sides=([+-]?\d+)/m.exec(body);
+    const r = gr ? parseFloat(gr[1]) : 100, sides = gs ? Math.max(3, Math.min(64, parseInt(gs[1]))) : 16;
+    return { kind: 'cyl', size: { x: r * 2, y: r * 2, z: gz ? parseFloat(gz[1]) : 200 }, sides };
+  }
+  return null;
+}
+function parseT3D(text) {
+  const norm = text.replace(/\r\n/g, '\n');
+  const results = [], errors = [];
+  const actorRe = /Begin Actor Class=\/Script\/Engine\.Brush[\s\S]*?End Actor/g;
+  let am, idx = 0;
+  while ((am = actorRe.exec(norm))) {
+    const actorText = am[0];
+    idx++;
+    const nameM = /Begin Actor Class=\/Script\/Engine\.Brush Name=(\S+)/.exec(actorText);
+    const label = nameM ? nameM[1] : `actor #${idx}`;
+    try {
+      const locStr = /RelativeLocation=\([^)]*\)/.exec(actorText);
+      const rotStr = /RelativeRotation=\([^)]*\)/.exec(actorText);
+      const loc = locStr ? importParseVec3(locStr[0], 'X', 'Y', 'Z') : { x: 0, y: 0, z: 0 };
+      const pRot = rotStr ? {
+        pitch: parseFloat((/Pitch=([+-]?[\d.]+)/.exec(rotStr[0]) || [0, 0])[1]) || 0,
+        yaw: parseFloat((/Yaw=([+-]?[\d.]+)/.exec(rotStr[0]) || [0, 0])[1]) || 0,
+        roll: parseFloat((/Roll=([+-]?[\d.]+)/.exec(rotStr[0]) || [0, 0])[1]) || 0,
+      } : { pitch: 0, yaw: 0, roll: 0 };
+      const isSub = /BrushType=Brush_Subtract/.test(actorText);
+      const op = isSub ? 'sub' : 'add';
+      const yaw = pRot.yaw * Math.PI / 180, pitch = pRot.pitch * Math.PI / 180, roll = pRot.roll * Math.PI / 180;
+      const faces = importParsePolyList(actorText);
+      const builder = importParseBuilder(actorText);
+      let rec = null;
+      if (builder && builder.kind === 'box') rec = { type: 'box', size: builder.size, center: [0, 0, 0] };
+      else if (builder && builder.kind === 'cyl') rec = { type: 'cyl', size: builder.size, sides: builder.sides, center: [0, 0, 0] };
+      else if (faces.length) rec = fitPrimitive(faces);
+      let out;
+      if (rec) {
+        const worldOfs = rotUnreal(rec.center, yaw, pitch, roll);
+        out = { type: rec.type, op, size: rec.size,
+          pos: { x: loc.x + worldOfs[0], y: loc.y + worldOfs[1], z: loc.z + worldOfs[2] },
+          yaw, pitch, roll };
+        if (rec.sides) out.sides = rec.sides;
+      } else if (faces.length) {
+        // raw fallback — recenter on the polygon set's own bbox centroid.
+        const allV = faces.flat();
+        const xs = allV.map(p => p[0]), ys = allV.map(p => p[1]), zs = allV.map(p => p[2]);
+        const center = [(arrMin(xs) + arrMax(xs)) / 2, (arrMin(ys) + arrMax(ys)) / 2, (arrMin(zs) + arrMax(zs)) / 2];
+        const recentered = faces.map(f => f.map(p => [p[0] - center[0], p[1] - center[1], p[2] - center[2]]));
+        const worldOfs = rotUnreal(center, yaw, pitch, roll);
+        out = { type: 'raw', op, polys: recentered,
+          pos: { x: loc.x + worldOfs[0], y: loc.y + worldOfs[1], z: loc.z + worldOfs[2] },
+          yaw, pitch, roll };
+      } else { errors.push({ label, reason: 'no PolyList / no vertices found' }); continue; }
+      results.push(out);
+    } catch (e) {
+      errors.push({ label, reason: (e && e.message) || String(e) });
+    }
+  }
+  return { results, errors };
+}
+
 // ---- export hub ----
 const exportOverlay=document.getElementById('exportOverlay');
 let lastT3D='';
@@ -1100,7 +1543,7 @@ document.querySelectorAll('#exportScopeSeg button').forEach(btn=>{
   };
 });
 exportOverlay.addEventListener('click',e=>{ if(e.target===exportOverlay) closeExport(); });
-window.addEventListener('keydown',e=>{ if(e.key==='Escape') closeExport(); });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeExport(); closeImport(); } });
 
 // data: URI download — reliable on iOS (Blob URL produces empty files on iOS Safari)
 function downloadFile(txt,name){
@@ -1167,6 +1610,68 @@ document.getElementById('diagSelectAll').onclick=()=>{
 };
 document.getElementById('t3d').addEventListener('focus',function(){ this.select(); });
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
+
+// ---- import modal wiring ----
+const importOverlay=document.getElementById('importOverlay');
+let pendingImport=null;
+function openImport(){
+  document.getElementById('importText').value='';
+  document.getElementById('importInfo').textContent='—';
+  document.getElementById('importSummary').style.display='none';
+  document.getElementById('importCommitBtn').disabled=true;
+  pendingImport=null;
+  importOverlay.classList.add('open');
+}
+function closeImport(){ importOverlay.classList.remove('open'); }
+function parseImportText(){
+  const text=document.getElementById('importText').value;
+  if(!text.trim()){ toast('Paste some T3D text first'); return; }
+  let parsed, errs;
+  try{ ({results:parsed, errors:errs}=parseT3D(text)); }catch(e){ toast('Could not parse — check it\'s T3D text'); return; }
+  if(!parsed.length){
+    document.getElementById('importInfo').textContent=`0 brushes found${errs.length?` (${errs.length} failed)`:''}`;
+    const sEl0=document.getElementById('importSummary');
+    if(errs.length){
+      sEl0.style.display='block';
+      sEl0.innerHTML='<b>Every actor failed to parse:</b><br>'+errs.slice(0,20).map(e=>`${e.label}: ${e.reason}`).join('<br>');
+    } else sEl0.style.display='none';
+    document.getElementById('importCommitBtn').disabled=true;
+    pendingImport=null;
+    toast(errs.length?'No brushes recovered — see details below':'No Brush actors found in that text');
+    return;
+  }
+  const counts={};
+  parsed.forEach(p=>{ counts[p.type]=(counts[p.type]||0)+1; });
+  const label={box:'box',cyl:'cylinder',cone:'cone',ramp:'ramp',raw:'imported (raw)'};
+  const summary=Object.entries(counts).map(([t,n])=>`${n} ${label[t]||t}`).join(', ');
+  document.getElementById('importInfo').textContent=`${parsed.length} brush${parsed.length===1?'':'es'} found${errs.length?`, ${errs.length} failed`:''}`;
+  const sEl=document.getElementById('importSummary');
+  sEl.style.display='block';
+  let html=`<b>${summary}</b>${counts.raw?'<br>Raw brushes keep exact geometry but can\'t be resized or GEO-edited.':''}`;
+  if(errs.length) html+=`<br><b style="color:var(--warn)">${errs.length} actor${errs.length===1?'':'s'} failed:</b><br>`+errs.slice(0,20).map(e=>`${e.label}: ${e.reason}`).join('<br>');
+  sEl.innerHTML=html;
+  pendingImport=parsed;
+  document.getElementById('importCommitBtn').disabled=false;
+}
+function commitImport(){
+  if(!pendingImport||!pendingImport.length) return;
+  pendingImport.forEach(p=>{
+    const b={id:nextId++, type:p.type, op:p.op, pos:p.pos,
+      yaw:p.yaw||0, pitch:p.pitch||0, roll:p.roll||0, visible:true};
+    if(p.type==='raw') b.polys=p.polys;
+    else { b.size=p.size; b.sides=p.sides||16; }
+    b.name=defaultName(p.type,b.id);
+    brushes.push(b); buildMesh(b);
+  });
+  pushHistory(); refreshHUD();
+  toast(`Imported ${pendingImport.length} brush${pendingImport.length===1?'':'es'}`);
+  closeImport();
+}
+document.getElementById('importBtn').onclick=openImport;
+document.getElementById('iclose').onclick=closeImport;
+importOverlay.addEventListener('click',e=>{ if(e.target===importOverlay) closeImport(); });
+document.getElementById('importParseBtn').onclick=parseImportText;
+document.getElementById('importCommitBtn').onclick=commitImport;
 
 
 document.getElementById('groundBtn').onclick=()=>{
@@ -1389,7 +1894,8 @@ function pick(px,py,shift=false){
 
 // Local Z extents — differs from ±size.z/2 once a box has edited corners.
 function localZMin(b){
-  if(b.corners) return Math.min(...b.corners.map(c=>c[2]));
+  if(b.corners) return arrMin(b.corners.map(c=>c[2]));
+  if(b.type==='raw') return arrMin(b.polys.flat().map(p=>p[2]));
   return -b.size.z/2;
 }
 
@@ -2024,7 +2530,7 @@ function serializeScene(){
 }
 function applySceneData(data){
   if(!data||!Array.isArray(data.brushes)) return false;
-  brushes.forEach(b=>{scene.remove(b.mesh);scene.remove(b.edges);});
+  brushes.forEach(b=>{scene.remove(b.mesh);disposeMesh(b.mesh);scene.remove(b.edges);disposeMesh(b.edges);});
   brushes.length=0;
   data.brushes.forEach(d=>{brushes.push(d);buildMesh(d);});
   nextId=data.nextId||(brushes.reduce((m,b)=>Math.max(m,b.id),0)+1);
@@ -2116,7 +2622,7 @@ document.getElementById('sNewBtn').onclick=(e)=>{
   const btn=e.currentTarget;
   if(btn.dataset.confirming){
     btn.dataset.confirming=''; btn.textContent='New'; btn.classList.remove('danger');
-    brushes.forEach(b=>{scene.remove(b.mesh);scene.remove(b.edges);}); brushes.length=0;
+    brushes.forEach(b=>{scene.remove(b.mesh);disposeMesh(b.mesh);scene.remove(b.edges);disposeMesh(b.edges);}); brushes.length=0;
     nextId=1; hist.length=0; histIdx=-1;
     addBrush('box'); select(brushes[0]);
     document.getElementById('sceneNameInput').value='';
@@ -2152,6 +2658,7 @@ function csgPolysFromBrush(b){
 
 // Split polygon by plane into coplanar-front, coplanar-back, front, back lists
 function csgSplit(plane, poly, cf, cb, front, back){
+  if(++csgSplitCount>CSG_SPLIT_BUDGET) throw new Error('CSG split budget exceeded');
   const COPLANAR=0, FRONT=1, BACK=2, SPANNING=3;
   let polyType=0; const types=[];
   for(const v of poly.verts){
@@ -2186,74 +2693,270 @@ function csgSplit(plane, poly, cf, cb, front, back){
 
 // BSP node
 function csgNode(polys){ const n={plane:null, front:null, back:null, polys:[]}; if(polys&&polys.length) csgBuild(n,polys); return n; }
-function csgBuild(node, polys){
-  if(!polys.length) return;
-  if(!node.plane) node.plane=polys[0].plane;
-  const front=[], back=[];
-  for(const p of polys) csgSplit(node.plane, p, node.polys, node.polys, front, back);
-  if(front.length){ node.front=node.front||csgNode(); csgBuild(node.front, front); }
-  if(back.length){ node.back=node.back||csgNode(); csgBuild(node.back, back); }
+// Iterative (explicit work-stack) BSP build. Recursion depth in the old
+// version grew linearly with brush count (rebuildCsg folds brushes into the
+// tree one at a time), so a large imported scene (hundreds of brushes) blew
+// the call stack — confirmed via node: the old recursive csgInvert overflows
+// by depth ~20000, and the accumulated tree's depth is roughly brush count.
+// This does the exact same tree mutations, just via an explicit stack instead
+// of the call stack, so there's no depth ceiling regardless of scene size.
+// Verified byte-identical output against the recursive original across 5
+// union/subtract/mixed-shape scenarios before swapping in.
+function csgBuild(rootNode, rootPolys){
+  const stack=[{node:rootNode, polys:rootPolys}];
+  while(stack.length){
+    const {node, polys}=stack.pop();
+    if(!polys.length) continue;
+    if(!node.plane) node.plane=polys[0].plane;
+    const front=[], back=[];
+    for(const p of polys) csgSplit(node.plane, p, node.polys, node.polys, front, back);
+    if(front.length){ node.front=node.front||csgNode(); stack.push({node:node.front, polys:front}); }
+    if(back.length){ node.back=node.back||csgNode(); stack.push({node:node.back, polys:back}); }
+  }
 }
-function csgInvert(node){
-  for(const p of node.polys){ p.verts.reverse(); p.plane={n:[-p.plane.n[0],-p.plane.n[1],-p.plane.n[2]], w:-p.plane.w}; }
-  if(node.plane) node.plane={n:[-node.plane.n[0],-node.plane.n[1],-node.plane.n[2]], w:-node.plane.w};
-  const t=node.front; node.front=node.back; node.back=t;
-  if(node.front) csgInvert(node.front);
-  if(node.back) csgInvert(node.back);
+function csgInvert(root){
+  const stack=[root];
+  while(stack.length){
+    const node=stack.pop();
+    for(const p of node.polys){ p.verts.reverse(); p.plane={n:[-p.plane.n[0],-p.plane.n[1],-p.plane.n[2]], w:-p.plane.w}; }
+    if(node.plane) node.plane={n:[-node.plane.n[0],-node.plane.n[1],-node.plane.n[2]], w:-node.plane.w};
+    const t=node.front; node.front=node.back; node.back=t;
+    if(node.front) stack.push(node.front);
+    if(node.back) stack.push(node.back);
+  }
 }
-function csgClipPolys(node, polys){
-  if(!node.plane) return polys.slice();
-  let front=[], back=[];
-  for(const p of polys) csgSplit(node.plane, p, front, back, front, back);
-  if(node.front) front=csgClipPolys(node.front, front);
-  back = node.back ? csgClipPolys(node.back, back) : [];
-  return front.concat(back);
+// Post-order combine via an explicit frame stack — preserves the original's
+// asymmetric semantics exactly: a missing node.front keeps the UNCLIPPED
+// front list (open space keeps polys), a missing node.back yields an EMPTY
+// list (solid interior discards polys). Getting this asymmetry backwards
+// silently corrupts every CSG result, so it's covered by the equivalence
+// test rather than just the depth-survival test.
+function csgClipPolys(rootNode, rootPolys){
+  let uid=0;
+  const resultsById=new Map();
+  const stack=[{id:uid++, node:rootNode, polys:rootPolys, phase:'enter'}];
+  const rootId=stack[0].id;
+  while(stack.length){
+    const frame=stack[stack.length-1];
+    if(frame.phase==='enter'){
+      if(!frame.node.plane){ resultsById.set(frame.id, frame.polys.slice()); stack.pop(); continue; }
+      const front=[], back=[];
+      for(const p of frame.polys) csgSplit(frame.node.plane, p, front, back, front, back);
+      frame.phase='combine';
+      if(frame.node.back){ frame.backId=uid++; stack.push({id:frame.backId, node:frame.node.back, polys:back, phase:'enter'}); }
+      else frame.backResult=[];
+      if(frame.node.front){ frame.frontId=uid++; stack.push({id:frame.frontId, node:frame.node.front, polys:front, phase:'enter'}); }
+      else frame.frontResult=front;
+    } else {
+      const frontResult = frame.frontId!=null ? resultsById.get(frame.frontId) : frame.frontResult;
+      const backResult = frame.backId!=null ? resultsById.get(frame.backId) : frame.backResult;
+      resultsById.set(frame.id, frontResult.concat(backResult));
+      stack.pop();
+    }
+  }
+  return resultsById.get(rootId);
 }
-function csgClipTo(node, bsp){
-  node.polys=csgClipPolys(bsp, node.polys);
-  if(node.front) csgClipTo(node.front, bsp);
-  if(node.back) csgClipTo(node.back, bsp);
+function csgClipTo(root, bsp){
+  const stack=[root];
+  while(stack.length){
+    const node=stack.pop();
+    node.polys=csgClipPolys(bsp, node.polys);
+    if(node.front) stack.push(node.front);
+    if(node.back) stack.push(node.back);
+  }
 }
-function csgAll(node){
-  let polys=node.polys.slice();
-  if(node.front) polys=polys.concat(csgAll(node.front));
-  if(node.back) polys=polys.concat(csgAll(node.back));
+// Per-polygon AABB, cached on the poly object. Fragments from csgSplit are
+// fresh objects (no stale cache); csgInvert only reverses winding and flips
+// the plane, leaving the AABB unchanged, so the cache survives inversion.
+// CSG polys are display-only — _aabb never touches the export path.
+function csgPolyAABB(p){
+  if(p._aabb) return p._aabb;
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity,zmin=Infinity,zmax=-Infinity;
+  for(const v of p.verts){
+    if(v[0]<xmin)xmin=v[0]; if(v[0]>xmax)xmax=v[0];
+    if(v[1]<ymin)ymin=v[1]; if(v[1]>ymax)ymax=v[1];
+    if(v[2]<zmin)zmin=v[2]; if(v[2]>zmax)zmax=v[2];
+  }
+  return p._aabb={xmin,xmax,ymin,ymax,zmin,zmax};
+}
+// csgClipTo, but polys AABB-disjoint from the clip solid's AABB pass through
+// UNCLIPPED. Exact, not approximate: clipping against bsp does two things —
+// discards material inside bsp's solid, and splits polys along bsp's planes.
+// A poly wholly outside bsp's AABB has no part inside the solid (solid ⊂
+// AABB), so its post-clip coverage is identical; the only thing skipping
+// avoids is pointless fragmentation from bsp's INFINITE planes, which extend
+// far past the brush itself. That fragmentation was the memory bomb on open
+// levels: one shared floor slab touches everything (single island), and
+// every small brush's 6 infinite planes shredded the whole floor into
+// fragments, which the next brush shredded again — superlinear poly growth
+// until OOM. With the bound, distant polys are never split, and total poly
+// count grows roughly linearly with brush count instead.
+function csgClipToBounded(root, bsp, bspAABB){
+  const stack=[root];
+  while(stack.length){
+    const node=stack.pop();
+    const near=[], far=[];
+    for(const p of node.polys) (csgAabbOverlap(csgPolyAABB(p), bspAABB) ? near : far).push(p);
+    node.polys = near.length ? far.concat(csgClipPolys(bsp, near)) : far;
+    if(node.front) stack.push(node.front);
+    if(node.back) stack.push(node.back);
+  }
+}
+function csgAll(root){
+  const polys=[];
+  const stack=[root];
+  while(stack.length){
+    const node=stack.pop();
+    for(const p of node.polys) polys.push(p);
+    if(node.back) stack.push(node.back);
+    if(node.front) stack.push(node.front);
+  }
   return polys;
 }
-function csgUnion(a,b){
-  csgClipTo(a,b); csgClipTo(b,a);
+// bAABB (optional): b's solid AABB. When given, the big accumulated side (a)
+// clips against b via the bounded pass-through above. The small side (b) is
+// always clipped against ALL of a — b can sit deep inside a's solid far from
+// any of a's faces, so classifying b needs the full tree; only a's side is
+// safely boundable. Called without bAABB, behavior is byte-identical to the
+// original (used by anything that doesn't precompute the box).
+function csgUnion(a,b,bAABB){
+  if(bAABB) csgClipToBounded(a,b,bAABB); else csgClipTo(a,b);
+  csgClipTo(b,a);
   csgInvert(b); csgClipTo(b,a); csgInvert(b);
   csgBuild(a, csgAll(b));
   return a;
 }
-function csgSubtract(a,b){
+function csgSubtract(a,b,bAABB){
   csgInvert(a);
-  csgClipTo(a,b); csgClipTo(b,a);
+  if(bAABB) csgClipToBounded(a,b,bAABB); else csgClipTo(a,b);
+  csgClipTo(b,a);
   csgInvert(b); csgClipTo(b,a); csgInvert(b);
   csgBuild(a, csgAll(b));
   csgInvert(a);
   return a;
 }
 
-function rebuildCsg(){
-  if(csgMesh){ scene.remove(csgMesh); csgMesh=null; }
-  if(csgEdges){ scene.remove(csgEdges); csgEdges=null; }
+// AABB helpers for the island-partitioning optimization in rebuildCsg below.
+function csgPolysAABB(polys){
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity,zmin=Infinity,zmax=-Infinity;
+  for(const p of polys) for(const v of p.verts){
+    if(v[0]<xmin)xmin=v[0]; if(v[0]>xmax)xmax=v[0];
+    if(v[1]<ymin)ymin=v[1]; if(v[1]>ymax)ymax=v[1];
+    if(v[2]<zmin)zmin=v[2]; if(v[2]>zmax)zmax=v[2];
+  }
+  return {xmin,xmax,ymin,ymax,zmin,zmax};
+}
+function csgAabbOverlap(a,b,eps=1e-4){
+  return a.xmin<=b.xmax+eps && a.xmax>=b.xmin-eps &&
+         a.ymin<=b.ymax+eps && a.ymax>=b.ymin-eps &&
+         a.zmin<=b.zmax+eps && a.zmax>=b.zmin-eps;
+}
 
-  const active=brushes.filter(b=>b.visible!==false);
-  const firstAdd=active.findIndex(b=>b.op==='add');
-  if(firstAdd<0){ updateBrushFills(); return; }
+// Convexity test: every vertex of every face must lie on or behind every
+// face's plane. Convex poly sets build a BSP with ZERO self-splits (each
+// face plane has everything else behind it), so they're always safe CSG
+// participants. Non-convex raw imports (e.g. a 175-poly staircase authored
+// in UE geometry mode — real case from the LVHotelLobby scene) make
+// csgBuild explode combinatorially: every concave face's INFINITE plane
+// crosses many other faces, fragments recurse into both subtrees, and one
+// such brush alone exhausted a 2GB heap. The AABB bound can't help here —
+// the blowup is inside the brush's own AABB.
+function csgIsConvex(faces, eps=0.01){
+  for(const f of faces){
+    const n=normalOf(f);
+    const w=n[0]*f[0][0]+n[1]*f[0][1]+n[2]*f[0][2];
+    for(const g of faces) for(const v of g){
+      if(n[0]*v[0]+n[1]*v[1]+n[2]*v[2]-w > eps) return false;
+    }
+  }
+  return true;
+}
+
+// Safety net: a hard budget on polygon splits per rebuild. If ANY input
+// (imported or otherwise) still manages to trigger runaway splitting, the
+// rebuild aborts cleanly and falls back to individual-brush display instead
+// of taking the whole tab down with an out-of-memory crash. Reset by
+// rebuildCsg before each fold; csgSplit throws when exceeded.
+let csgSplitCount=0;
+const CSG_SPLIT_BUDGET=4e6;
+
+// Pure CSG fold: takes plain brush data, returns {polys, excludedIds}.
+// No DOM, no THREE, no globals besides the csg* functions — this exact
+// function (via Function.toString) is also shipped to the Web Worker, so it
+// must stay self-contained. Throws on split-budget blowout; callers catch.
+function csgFoldScene(brushList){
+  const visible=brushList.filter(b=>b.visible!==false);
+  // Non-convex raw imports are excluded from the combined solid: building a
+  // BSP from a concave poly soup can explode combinatorially (see
+  // csgIsConvex). They still render individually, stay selectable/movable,
+  // and EXPORT IS UNAFFECTED — UE runs its own BSP on paste. Convexity is
+  // cached on the brush object; raw geometry is immutable after import (in
+  // the worker the objects are clones, so it just recomputes — ~ms).
+  const excludedIds=[];
+  const active=visible.filter(b=>{
+    if(b.type!=='raw') return true;
+    if(b._csgConvex===undefined) b._csgConvex=csgIsConvex(facesFor(b));
+    if(!b._csgConvex) excludedIds.push(b.id);
+    return b._csgConvex;
+  });
+  if(active.findIndex(b=>b.op==='add')<0) return {polys:[], excludedIds};
 
   // Process in brush order (top of outliner = first / lowest priority).
   // Each add unions into the result; each sub carves whatever came before it.
   // A sub only affects earlier brushes — an add placed after a sub fills back in.
   // This matches UE4.27's BSP brush order (later brushes override earlier ones).
-  let result=csgNode(csgPolysFromBrush(active[firstAdd]));
-  for(let i=firstAdd+1;i<active.length;i++){
-    const node=csgNode(csgPolysFromBrush(active[i]));
-    result = active[i].op==='sub' ? csgSubtract(result,node) : csgUnion(result,node);
-  }
+  //
+  // PERFORMANCE: naively chaining csgUnion/csgSubtract clips every brush
+  // against the ENTIRE accumulated tree so far, so cost grows ~O(n^2) with
+  // brush count even when most brushes are nowhere near each other (separate
+  // rooms in a level, say — exactly what a large imported scene looks like).
+  // Partition into independent islands by transitive AABB overlap first, run
+  // the exact same sequential algorithm within each island (relative order
+  // preserved), then concatenate island results directly with NO cross-
+  // clipping — safe because an island's accumulated solid is always
+  // contained within the union of its own brushes' AABBs, which by
+  // construction don't overlap any other island's. ~35x faster at 800
+  // brushes in a spatially-separated layout, roughly linear past 5000+.
+  const polysCache=active.map(b=>csgPolysFromBrush(b));
+  const aabbs=polysCache.map(csgPolysAABB);
+  const parent=active.map((_,i)=>i);
+  const find=i=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  for(let i=0;i<active.length;i++) for(let j=i+1;j<active.length;j++)
+    if(csgAabbOverlap(aabbs[i],aabbs[j])){ const ri=find(i), rj=find(j); if(ri!==rj) parent[ri]=rj; }
+  const islands=new Map();
+  for(let i=0;i<active.length;i++){ const r=find(i); if(!islands.has(r)) islands.set(r,[]); islands.get(r).push(i); }
 
-  const polys=csgAll(result);
+  const polys=[];
+  csgSplitCount=0;
+  for(const idxList of islands.values()){
+    const firstAddLocal=idxList.findIndex(i=>active[i].op==='add');
+    if(firstAddLocal<0) continue; // island with only subtracts contributes nothing
+    let result=csgNode(polysCache[idxList[firstAddLocal]]);
+    for(let k=firstAddLocal+1;k<idxList.length;k++){
+      const i=idxList[k];
+      const node=csgNode(polysCache[i]);
+      // aabbs[i] (already computed for island partitioning) bounds this
+      // brush's solid — passing it lets the accumulated side skip clipping
+      // (and fragmenting) everything outside the brush's reach. See
+      // csgClipToBounded for why this is exact.
+      result = active[i].op==='sub' ? csgSubtract(result,node,aabbs[i]) : csgUnion(result,node,aabbs[i]);
+    }
+    for(const p of csgAll(result)) polys.push(p);
+  }
+  return {polys, excludedIds};
+}
+
+// Apply a fold result to the scene: mark exclusions, swap the combined mesh.
+// The OLD mesh stays visible until the new one is ready — during an async
+// (worker) rebuild the user keeps a stale-but-useful preview instead of a
+// blank flash.
+function applyCsgResult(polys, excludedIds){
+  const excl=new Set(excludedIds);
+  brushes.forEach(b=>{ b._csgExcluded=excl.has(b.id); });
+
+  if(csgMesh){ scene.remove(csgMesh); disposeMesh(csgMesh); csgMesh=null; }
+  if(csgEdges){ scene.remove(csgEdges); disposeMesh(csgEdges); csgEdges=null; }
+
   const pos=[], nor=[];
   for(const p of polys){
     const v=p.verts.map(tv);            // Unreal → Three
@@ -2280,6 +2983,125 @@ function rebuildCsg(){
   updateBrushFills();
 }
 
+// Synchronous rebuild path (fallback; the worker path in scheduleCsg is
+// preferred). Budget blowout falls back to individual-brush display.
+function rebuildCsgSync(){
+  let out;
+  try{ out=csgFoldScene(brushes); }
+  catch(e){
+    console.warn('CSG rebuild aborted (split budget exceeded); showing individual brushes.', e);
+    if(typeof toast==='function') toast('CSG preview too complex — showing individual brushes');
+    if(csgMesh){ scene.remove(csgMesh); disposeMesh(csgMesh); csgMesh=null; }
+    if(csgEdges){ scene.remove(csgEdges); disposeMesh(csgEdges); csgEdges=null; }
+    updateBrushFills();
+    return;
+  }
+  applyCsgResult(out.polys, out.excludedIds);
+}
+
+// ---- async CSG via Web Worker ----
+// The fold on a large scene takes seconds; running it on the main thread
+// froze every edit for that long. The worker runs the IDENTICAL code —
+// csgWorkerSource() assembles the worker script from the live functions via
+// Function.toString(), so there is exactly one copy of the CSG logic and it
+// cannot drift. While the worker computes, the previous combined mesh stays
+// visible (stale-but-useful preview) and editing stays fully responsive.
+// A newer edit supersedes an in-flight fold: the worker is terminated and
+// respawned rather than left burning seconds on an obsolete scene.
+// If Worker/Blob construction fails (some file:// contexts), everything
+// falls back to the synchronous path — same results, old latency.
+function csgWorkerSource(){
+  const fns=[quadPlanar, splitQuad, rotUnreal, facesFor, normalOf,
+    csgPlaneFromFace, csgPolysFromBrush, csgSplit, csgNode, csgBuild,
+    csgInvert, csgClipPolys, csgClipTo, csgAll, csgUnion, csgSubtract,
+    csgPolysAABB, csgAabbOverlap, csgPolyAABB, csgClipToBounded,
+    csgIsConvex, csgFoldScene];
+  return 'var csgSplitCount=0;\n'
+    +'var CSG_SPLIT_BUDGET='+CSG_SPLIT_BUDGET+';\n'
+    +'var CSG_EPS='+CSG_EPS+';\n'
+    +'var GEO_FACES='+JSON.stringify(GEO_FACES)+';\n'
+    +fns.map(f=>String(f)).join('\n')+'\n'
+    +'self.onmessage=function(ev){\n'
+    +'  var d=ev.data;\n'
+    +'  try{ var r=csgFoldScene(d.brushes);\n'
+    +'    self.postMessage({seq:d.seq, ok:true, polys:r.polys, excludedIds:r.excludedIds});\n'
+    +'  }catch(e){\n'
+    +'    self.postMessage({seq:d.seq, ok:false, budget:/split budget/.test(String(e&&e.message)), err:String(e&&e.message)});\n'
+    +'  }\n'
+    +'};\n';
+}
+let csgWorker=null, csgWorkerFailed=false, csgSeq=0, csgInFlight=false;
+let csgWorkerProven=false, csgWatchdog=null;
+// Some sandboxed contexts (notably Claude's artifact iframe) let
+// `new Worker(blobURL)` construct without throwing, then either fire an
+// async error or simply never respond. Until the worker has proven itself
+// by returning at least one result, guard each dispatch with a watchdog: if
+// no reply lands in time, declare the worker dead and fall back to the
+// synchronous fold so the preview still appears.
+const CSG_WORKER_WATCHDOG_MS=8000;
+function csgWorkerDied(reason){
+  if(csgWorkerFailed) return;
+  console.warn('CSG worker unavailable ('+reason+'); falling back to synchronous CSG.');
+  try{ csgWorker&&csgWorker.terminate(); }catch(_){}
+  csgWorker=null; csgWorkerFailed=true; csgInFlight=false;
+  clearTimeout(csgWatchdog); csgWatchdog=null;
+  rebuildCsgSync();
+  if(typeof refreshHUD==='function') refreshHUD();
+}
+function csgEnsureWorker(){
+  if(csgWorker||csgWorkerFailed) return csgWorker;
+  try{
+    const url=URL.createObjectURL(new Blob([csgWorkerSource()],{type:'text/javascript'}));
+    csgWorker=new Worker(url);
+    URL.revokeObjectURL(url);
+    csgWorker.onmessage=(ev)=>{
+      const d=ev.data;
+      if(d.seq!==csgSeq) return; // superseded result — a newer rebuild is authoritative
+      csgInFlight=false; csgWorkerProven=true;
+      clearTimeout(csgWatchdog); csgWatchdog=null;
+      if(d.ok){ applyCsgResult(d.polys, d.excludedIds); }
+      else{
+        console.warn('CSG rebuild aborted in worker:', d.err);
+        if(d.budget && typeof toast==='function') toast('CSG preview too complex — showing individual brushes');
+        if(csgMesh){ scene.remove(csgMesh); disposeMesh(csgMesh); csgMesh=null; }
+        if(csgEdges){ scene.remove(csgEdges); disposeMesh(csgEdges); csgEdges=null; }
+        updateBrushFills();
+      }
+      if(typeof refreshHUD==='function') refreshHUD();
+    };
+    csgWorker.onerror=(e)=>{
+      // Worker itself broke (not a budget abort) — permanently fall back.
+      csgWorkerDied('worker error'+(e&&e.message?': '+e.message:''));
+    };
+  }catch(e){
+    console.warn('CSG worker unavailable; using synchronous CSG.', e);
+    csgWorkerFailed=true; csgWorker=null;
+  }
+  return csgWorker;
+}
+function rebuildCsg(){
+  if(csgWorkerFailed){ rebuildCsgSync(); return; }
+  if(csgInFlight && csgWorker){
+    // Supersede: don't let the worker finish a fold for a scene that no
+    // longer exists. Terminate and respawn (respawn cost is trivial next
+    // to a multi-second fold).
+    try{ csgWorker.terminate(); }catch(_){}
+    csgWorker=null; csgInFlight=false;
+    clearTimeout(csgWatchdog); csgWatchdog=null;
+  }
+  const w=csgEnsureWorker();
+  if(!w){ rebuildCsgSync(); return; }
+  csgSeq++;
+  csgInFlight=true;
+  if(typeof refreshHUD==='function') refreshHUD();
+  w.postMessage({seq:csgSeq, brushes:brushes.map(({mesh,edges,...d})=>d)});
+  // Until the worker has ever replied, don't trust it to reply at all.
+  if(!csgWorkerProven){
+    clearTimeout(csgWatchdog);
+    csgWatchdog=setTimeout(()=>{ if(csgInFlight && !csgWorkerProven) csgWorkerDied('no response'); }, CSG_WORKER_WATCHDOG_MS);
+  }
+}
+
 // When CSG result exists, hide individual mesh fills (keep edges for selection).
 // Selected brushes get a subtle highlight so you know what you're editing.
 function updateBrushFills(){
@@ -2287,8 +3109,12 @@ function updateBrushFills(){
     if(!b.mesh) return;
     const isSel=selectedSet.has(b), vis=b.visible!==false;
     if(csgMesh){
-      b.mesh.visible=vis&&isSel;
+      // Brushes excluded from the combined solid (non-convex raw imports)
+      // keep their own fill — they have no representation in csgMesh.
+      const excluded=b._csgExcluded===true;
+      b.mesh.visible=vis&&(isSel||excluded);
       if(isSel){ b.mesh.material.opacity=0.22; b.mesh.renderOrder=2; }
+      else if(excluded){ b.mesh.material.opacity=0.55; b.mesh.renderOrder=0; }
     } else {
       b.mesh.visible=vis;
       b.mesh.material.opacity=b.op==='sub'?0.18:0.55;
