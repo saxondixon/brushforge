@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>BrushForge v0.11.0 — UE4.27 Blockout</title>
+<title>BrushForge v0.11.2 — UE4.27 Blockout</title>
 <style>
   :root{
     --bg:#101216; --panel:#181B22; --panel2:#1F232C; --line:#2A2F3A;
@@ -391,6 +391,23 @@
    (Y up) only for rendering; export uses raw Unreal coords.
    ------------------------------------------------------------
    CHANGELOG
+   0.11.2 Fix: display was MIRRORED relative to UE (left/right flipped) — a
+          vertex moved on the right appeared on the left after paste. Root
+          cause: U2T mapped left-handed Unreal into Three's right-handed space
+          with a det=+1 (orientation-preserving) transform, which renders as
+          a mirror. Changed U2T to (x,z,y) [det=-1, a reflection] so display
+          chirality matches UE. Done in two phases: (1) routed every inline
+          copy of the mapping (CSG tv, localAxisToThree, axis lines, gizmo
+          arrows, rotation-plane normals) through U2T so there's one source of
+          truth; (2) flipped U2T + its inverse threeDirToUnreal together.
+          Export is byte-identical (never used U2T); gizmo drag + rotation
+          directions verified unchanged. Reverts the 0.11.1 azimuth attempt.
+   0.11.1 Fix: default camera now matches UE's viewport handedness — Unreal
+          +Y (right) projects to screen-right at the starting view (was
+          mirrored: +Y pointed screen-left, so a corner that looked
+          front-right was actually front-left, and edits appeared flipped
+          after paste). Pure camera-default change (az 0.25pi -> 1.25pi);
+          U2T, geometry, winding, and export are untouched.
    0.11.0 Unified GEO interaction: face and edge now work like vertex — tap
           an element to select it, then an axis-constrained gizmo appears
           (1 arrow for a face along its normal, 2 for an edge, 3 for a
@@ -450,7 +467,7 @@
    ============================================================ */
 
 // ---- version ----
-const VERSION = "0.11.0";
+const VERSION = "0.11.2";
 
 // ---- config ----
 const SNAP = {value:10};
@@ -529,13 +546,17 @@ function axisLine(dir,color){
   const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),dir.clone().multiplyScalar(600)]);
   return new THREE.Line(g,new THREE.LineBasicMaterial({color}));
 }
-axes.add(axisLine(new THREE.Vector3(1,0,0),0xc0463f)); // Unreal +X
-axes.add(axisLine(new THREE.Vector3(0,0,-1),0x4f9d4a)); // Unreal +Y -> Three -Z
-axes.add(axisLine(new THREE.Vector3(0,1,0),0x3a6fb0)); // Unreal +Z -> Three +Y
+// Unreal(x,y,z) -> Three(x,y,z). SINGLE source of truth for the display
+// handedness mapping — every other display-space vector derives from this.
+// det = -1 (a reflection): this is REQUIRED to render left-handed Unreal data
+// in Three's right-handed space so it looks the SAME as UE (not mirrored).
+// Earlier (x,z,-y) was det +1 and produced a left/right mirror of UE.
+function U2T(x,y,z){ return new THREE.Vector3(x, z, y); }
+axes.add(axisLine(U2T(1,0,0),0xc0463f)); // Unreal +X (red)
+axes.add(axisLine(U2T(0,1,0),0x4f9d4a)); // Unreal +Y (green)
+axes.add(axisLine(U2T(0,0,1),0x3a6fb0)); // Unreal +Z (blue)
 scene.add(axes);
 
-// Unreal(x,y,z) -> Three(x,y,z)
-function U2T(x,y,z){ return new THREE.Vector3(x, z, -y); }
 
 // ---- brush model ----
 let nextId = 1;
@@ -1395,11 +1416,11 @@ let gizmoMode='move'; // 'move' | 'rotate' | 'scale'
 let gizmoSpace='world'; // 'world' | 'local' — only Move respects this; Scale is always local
 const gizmoRoot=new THREE.Group(); gizmoRoot.visible=false; scene.add(gizmoRoot);
 const GZ=260; // overall gizmo reach in scene units before the distance-based scale factor
-// dir is in THREE space: Unreal +X->(1,0,0), +Y->(0,0,-1), +Z->(0,1,0)
+// dir is in THREE space, derived from U2T so it tracks the display handedness
 const axisDefs=[
-  {comp:'x', dir:new THREE.Vector3(1,0,0),  color:0xE8554E, scaleFactor:2}, // X/Y grow symmetric -> *2
-  {comp:'y', dir:new THREE.Vector3(0,0,-1), color:0x5BD15B, scaleFactor:2},
-  {comp:'z', dir:new THREE.Vector3(0,1,0),  color:0x4F9DFF, scaleFactor:1}, // Z grows from base only
+  {comp:'x', dir:U2T(1,0,0), color:0xE8554E, scaleFactor:2}, // X/Y grow symmetric -> *2
+  {comp:'y', dir:U2T(0,1,0), color:0x5BD15B, scaleFactor:2},
+  {comp:'z', dir:U2T(0,0,1), color:0x4F9DFF, scaleFactor:1}, // Z grows from base only
 ];
 
 // -- move group: arrows --
@@ -1453,7 +1474,7 @@ const rotatePickers=[];
 // axis: which FRotator angle; threeAxis: rotation to lay the torus in that plane
 [
   {key:'yaw',   color:0x4F9DFF, rot:[Math.PI/2,0,0]}, // about Unreal+Z (Three+Y): ring in Three XZ
-  {key:'pitch', color:0x5BD15B, rot:[0,0,0]},          // about Unreal+Y (Three-Z): ring in Three XY
+  {key:'pitch', color:0x5BD15B, rot:[0,0,0]},          // about Unreal+Y (Three+Z): ring in Three XY
   {key:'roll',  color:0xE8554E, rot:[0,Math.PI/2,0]}, // about Unreal+X (Three+X): ring in Three YZ
 ].forEach(r=>{
   const ring=new THREE.Mesh(new THREE.TorusGeometry(ringR,ringTube,10,64),
@@ -1510,8 +1531,8 @@ let geoSelEl=null;        // selected element index within the current sub-mode,
 const geoGizmo=new THREE.Group(); geoGizmo.visible=false; scene.add(geoGizmo);
 const geoArrows={}; // comp -> {arrow, picker, baseDir}
 [{comp:'x',color:0xE8554E},{comp:'y',color:0x5BD15B},{comp:'z',color:0x4F9DFF}].forEach(ax=>{
-  // base dir = the local Unreal axis mapped into THREE (U2T of +axis)
-  const dir=ax.comp==='x'?new THREE.Vector3(1,0,0):ax.comp==='y'?new THREE.Vector3(0,0,-1):new THREE.Vector3(0,1,0);
+  // base dir = the local Unreal axis mapped into THREE via U2T
+  const dir=ax.comp==='x'?U2T(1,0,0):ax.comp==='y'?U2T(0,1,0):U2T(0,0,1);
   const arrow=new THREE.ArrowHelper(dir,new THREE.Vector3(0,0,0),GZ*0.7,ax.color,GZ*0.2,GZ*0.12);
   geoGizmo.add(arrow);
   const pk=new THREE.Mesh(new THREE.CylinderGeometry(GZ*0.12,GZ*0.12,GZ*0.7,8),
@@ -1647,15 +1668,19 @@ const rotatePlane=new THREE.Plane();
 // single-ring behaviour so existing yaw drags are unchanged.
 function rotateAngleAt(px,py,axis){
   let normal, comp;
-  if(axis==='pitch'){ normal=new THREE.Vector3(0,0,1); comp='pitch'; }
-  else if(axis==='roll'){ normal=new THREE.Vector3(1,0,0); comp='roll'; }
-  else { normal=new THREE.Vector3(0,1,0); comp='yaw'; }
+  // ring plane normals are the Unreal rotation axes mapped via U2T, so they
+  // track the display handedness automatically.
+  if(axis==='pitch'){ normal=U2T(0,1,0); comp='pitch'; } // about Unreal +Y
+  else if(axis==='roll'){ normal=U2T(1,0,0); comp='roll'; } // about Unreal +X
+  else { normal=U2T(0,0,1); comp='yaw'; }                   // about Unreal +Z
   rotatePlane.setFromNormalAndCoplanarPoint(normal, gizmoRoot.position);
   ray.setFromCamera(ndc(px,py), camera);
   const pt=new THREE.Vector3();
   if(!ray.ray.intersectPlane(rotatePlane, pt)) return null;
   const o=gizmoRoot.position;
-  if(comp==='yaw')   return Math.atan2(-(pt.z-o.z), pt.x-o.x);
+  // Measure the pointer angle in each ring plane. Signs chosen so a positive
+  // drag maps to a positive Unreal angle under rotUnreal (verified in tests).
+  if(comp==='yaw')   return Math.atan2(pt.z-o.z, pt.x-o.x);
   if(comp==='pitch') return Math.atan2(pt.y-o.y, pt.x-o.x);
   return Math.atan2(pt.z-o.z, pt.y-o.y); // roll
 }
@@ -1699,17 +1724,16 @@ function gizmoHitAxis(px,py){
   const hits=ray.intersectObjects(rotatePickers,false);
   return hits.length? {type:'rotate', rotAxis:hits[0].object.userData.rotAxis} : null;
 }
-// Three-space unit direction -> the Unreal-space displacement it represents
-// (inverse of U2T). Lets a single rotated drag axis move pos.x AND pos.y
-// together, which is what "Local" space dragging actually needs.
-function threeDirToUnreal(d){ return {x:d.x, y:-d.z, z:d.y}; }
+// Three-space unit direction -> the Unreal-space displacement it represents.
+// EXACT INVERSE of U2T, kept in lockstep: U2T(x,y,z)=(x,z,y) => inverse(a,b,c)=(a,c,b).
+function threeDirToUnreal(d){ return {x:d.x, y:d.z, z:d.y}; }
 // A brush's LOCAL Unreal axis (e.g. its own +X) as a world-space THREE unit
 // vector, using the SAME rotUnreal the geometry uses — so local-move arrows
 // and drag axes line up with the brush's actual faces at any pitch/yaw/roll.
 function localAxisToThree(b, ax){
   const v = ax==='x'?[1,0,0]:ax==='y'?[0,1,0]:[0,0,1];
   const r = rotUnreal(v, b.yaw||0, b.pitch||0, b.roll||0); // world Unreal dir
-  return new THREE.Vector3(r[0], r[2], -r[1]).normalize();  // -> Three (U2T dir)
+  return U2T(r[0], r[1], r[2]).normalize();                // -> Three (via U2T)
 }
 // Full-rotation THREE quaternion for orienting gizmo visual groups to match a
 // brush. Built from the brush's three rotated basis vectors so it can't drift
@@ -2113,8 +2137,8 @@ document.getElementById('sNewBtn').onclick=(e)=>{
 let csgMesh=null, csgEdges=null, csgTimer=null;
 const CSG_EPS=1e-5;
 
-// Unreal world-space point → Three.js coords (same mapping as U2T)
-function tv(p){ return {x:p[0], y:p[2], z:-p[1]}; }
+// Unreal world-space point → Three.js coords (derives from U2T)
+function tv(p){ const v=U2T(p[0],p[1],p[2]); return {x:v.x, y:v.y, z:v.z}; }
 
 // A CSG polygon: {verts:[[x,y,z],...], plane:{n:[x,y,z], w}}  (Unreal space)
 function csgPlaneFromFace(face){
@@ -2233,7 +2257,7 @@ function rebuildCsg(){
   const pos=[], nor=[];
   for(const p of polys){
     const v=p.verts.map(tv);            // Unreal → Three
-    const n=p.plane.n, nt={x:n[0], y:n[2], z:-n[1]};
+    const n=p.plane.n, nv=U2T(n[0],n[1],n[2]), nt={x:nv.x, y:nv.y, z:nv.z};
     for(let i=1;i<v.length-1;i++){        // fan-triangulate
       [v[0],v[i],v[i+1]].forEach(pt=>{ pos.push(pt.x,pt.y,pt.z); nor.push(nt.x,nt.y,nt.z); });
     }
